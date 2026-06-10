@@ -3,6 +3,106 @@ use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
 use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
+
+/// Nominal slot duration used to convert between slots and wall-clock time.
+/// Actual slot times vary slightly; callers should build their own margin in.
+pub const MS_PER_SLOT: u64 = 400;
+
+/// Snapshot of where the validator identity sits in the leader schedule.
+#[derive(Debug, Clone, Copy)]
+pub struct LeaderWindowInfo {
+    pub current_slot: u64,
+    /// Next absolute slot at which the identity is scheduled to be leader
+    /// (current slot included, i.e. `Some(current_slot)` means "leader right
+    /// now"). `None` when the identity has no known upcoming leader slots —
+    /// either it has none left this epoch and none in the next epoch's
+    /// schedule, or it simply carries no stake.
+    pub next_leader_slot: Option<u64>,
+}
+
+impl LeaderWindowInfo {
+    /// Slots until the next leader slot; `None` when no upcoming leader slot
+    /// is known (an effectively unbounded idle window).
+    pub fn idle_slots(&self) -> Option<u64> {
+        self.next_leader_slot
+            .map(|slot| slot.saturating_sub(self.current_slot))
+    }
+}
+
+/// Earliest absolute leader slot at or after `current_slot`, given the
+/// epoch-relative slot indexes returned by `getLeaderSchedule`.
+pub fn next_leader_slot_after(
+    slot_indexes: &[usize],
+    epoch_start_slot: u64,
+    current_slot: u64,
+) -> Option<u64> {
+    slot_indexes
+        .iter()
+        .map(|&idx| epoch_start_slot + idx as u64)
+        .filter(|&slot| slot >= current_slot)
+        .min()
+}
+
+/// Fetch the next scheduled leader slot for `identity_pubkey`, looking at the
+/// remainder of the current epoch and, if nothing is left there, the next
+/// epoch's schedule (which is already determined one epoch in advance).
+pub async fn fetch_leader_window(rpc_url: &str, identity_pubkey: &str) -> Result<LeaderWindowInfo> {
+    use solana_client::rpc_config::RpcLeaderScheduleConfig;
+    use std::time::Duration;
+
+    if rpc_url.is_empty() {
+        return Err(anyhow!("RPC URL is empty"));
+    }
+
+    let rpc_client = RpcClient::new_with_timeout(rpc_url.to_string(), Duration::from_secs(5));
+
+    let epoch_info = rpc_client
+        .get_epoch_info()
+        .map_err(|e| anyhow!("Failed to get epoch info: {}", e))?;
+    let current_slot = epoch_info.absolute_slot;
+    let epoch_start_slot = current_slot.saturating_sub(epoch_info.slot_index);
+
+    let config = RpcLeaderScheduleConfig {
+        identity: Some(identity_pubkey.to_string()),
+        commitment: None,
+    };
+
+    let identity_slots = |schedule: Option<std::collections::HashMap<String, Vec<usize>>>| {
+        schedule
+            .and_then(|mut map| map.remove(identity_pubkey))
+            .unwrap_or_default()
+    };
+
+    let current_epoch_schedule = rpc_client
+        .get_leader_schedule_with_config(Some(current_slot), config.clone())
+        .map_err(|e| anyhow!("Failed to get leader schedule: {}", e))?;
+    let mut next_leader_slot = next_leader_slot_after(
+        &identity_slots(current_epoch_schedule),
+        epoch_start_slot,
+        current_slot,
+    );
+
+    if next_leader_slot.is_none() {
+        // Nothing left this epoch — we might be close to the boundary with
+        // leader slots early in the next epoch. Best-effort: if the next
+        // epoch's schedule isn't available, treat it as no upcoming slots.
+        let next_epoch_start_slot = epoch_start_slot + epoch_info.slots_in_epoch;
+        if let Ok(schedule) =
+            rpc_client.get_leader_schedule_with_config(Some(next_epoch_start_slot), config)
+        {
+            next_leader_slot = next_leader_slot_after(
+                &identity_slots(schedule),
+                next_epoch_start_slot,
+                current_slot,
+            );
+        }
+    }
+
+    Ok(LeaderWindowInfo {
+        current_slot,
+        next_leader_slot,
+    })
+}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoteAccountInfo {
     pub vote_pubkey: String,
@@ -50,13 +150,13 @@ fn compute_tvc_rank(
         .iter()
         .chain(vote_account.delinquent.iter())
         .filter_map(|acct| {
-            acct.epoch_credits.last().map(|&(_, credits, prev)| {
-                (acct.vote_pubkey.clone(), credits.saturating_sub(prev))
-            })
+            acct.epoch_credits
+                .last()
+                .map(|&(_, credits, prev)| (acct.vote_pubkey.clone(), credits.saturating_sub(prev)))
         })
         .collect();
 
-    epoch_credits.sort_by(|a, b| b.1.cmp(&a.1));
+    epoch_credits.sort_by_key(|&(_, credits)| std::cmp::Reverse(credits));
     let total = epoch_credits.len() as u32;
     let rank = epoch_credits
         .iter()
@@ -88,7 +188,10 @@ fn compute_missed_votes(
     }
     let voted_slots: std::collections::HashSet<u64> =
         votes.iter().map(|l| l.lockout.slot()).collect();
-    let oldest_slot = votes.front().map(|l| l.lockout.slot()).unwrap_or(current_slot);
+    let oldest_slot = votes
+        .front()
+        .map(|l| l.lockout.slot())
+        .unwrap_or(current_slot);
     let raw_window = current_slot.saturating_sub(oldest_slot) + 1;
     let effective_window = raw_window.min(max_window);
     let window_start = current_slot.saturating_sub(effective_window - 1);
@@ -273,4 +376,56 @@ pub async fn fetch_vote_account_data(
         is_voting,
         tvc_metrics,
     })
+}
+
+#[cfg(test)]
+mod leader_window_tests {
+    use super::*;
+
+    #[test]
+    fn test_next_leader_slot_skips_past_slots() {
+        // Epoch starts at 1000; leader at indexes 5..8 and 100..103.
+        let indexes = vec![5, 6, 7, 8, 100, 101, 102, 103];
+        // Current slot 1050 — the first group is in the past.
+        assert_eq!(next_leader_slot_after(&indexes, 1000, 1050), Some(1100));
+    }
+
+    #[test]
+    fn test_next_leader_slot_includes_current_slot() {
+        // Being leader *right now* must count as an upcoming leader slot.
+        let indexes = vec![5, 6, 7, 8];
+        assert_eq!(next_leader_slot_after(&indexes, 1000, 1006), Some(1006));
+    }
+
+    #[test]
+    fn test_next_leader_slot_none_when_all_past() {
+        let indexes = vec![5, 6, 7, 8];
+        assert_eq!(next_leader_slot_after(&indexes, 1000, 2000), None);
+    }
+
+    #[test]
+    fn test_next_leader_slot_empty_schedule() {
+        assert_eq!(next_leader_slot_after(&[], 1000, 1050), None);
+    }
+
+    #[test]
+    fn test_idle_slots() {
+        let window = LeaderWindowInfo {
+            current_slot: 100,
+            next_leader_slot: Some(250),
+        };
+        assert_eq!(window.idle_slots(), Some(150));
+
+        let leading_now = LeaderWindowInfo {
+            current_slot: 100,
+            next_leader_slot: Some(100),
+        };
+        assert_eq!(leading_now.idle_slots(), Some(0));
+
+        let no_slots = LeaderWindowInfo {
+            current_slot: 100,
+            next_leader_slot: None,
+        };
+        assert_eq!(no_slots.idle_slots(), None);
+    }
 }

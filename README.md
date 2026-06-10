@@ -87,6 +87,8 @@ svs status --validator 0      # Check specific validator by index
 svs switch                    # Perform validator switch
 svs switch --dry-run          # Preview switch without executing
 svs switch --validator 1      # Switch specific validator by index
+svs switch --min-idle-time 30 # Require 30s without leader slots before switching (default: 60)
+svs switch --skip-leader-check # Switch immediately without waiting for a restart window
 svs test-alert                # Test Telegram alert configuration
 svs --config /path/to/config  # Use custom config file for any command
 svs --version                 # Show version

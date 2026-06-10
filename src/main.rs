@@ -74,6 +74,17 @@ enum Commands {
         /// Select validator by index (0-based) or identity prefix
         #[arg(short, long)]
         validator: Option<String>,
+        /// Minimum idle time in seconds (no upcoming leader slots) required
+        /// before switching, like `agave-validator wait-for-restart-window`
+        #[arg(
+            long,
+            value_name = "SECONDS",
+            default_value_t = commands::switch::DEFAULT_MIN_IDLE_TIME_SECS
+        )]
+        min_idle_time: u64,
+        /// Skip waiting for a leader-slot-free restart window
+        #[arg(long)]
+        skip_leader_check: bool,
     },
     /// Test alert configuration
     TestAlert,
@@ -170,13 +181,28 @@ async fn main() -> Result<()> {
                 std::process::exit(1);
             }
         }
-        Some(Commands::Switch { dry_run, validator }) => {
+        Some(Commands::Switch {
+            dry_run,
+            validator,
+            min_idle_time,
+            skip_leader_check,
+        }) => {
             if let Some(mut state) = app_state {
                 // Apply validator selection if provided
                 if let Some(validator_arg) = validator {
                     state.select_validator_from_arg(&validator_arg)?;
                 }
-                let show_status = switch_command(dry_run, &mut state).await?;
+                let leader_check = commands::switch::LeaderCheckSettings {
+                    enabled: !skip_leader_check,
+                    min_idle_time_secs: min_idle_time,
+                };
+                let show_status = commands::switch::switch_command_with_options(
+                    dry_run,
+                    &mut state,
+                    !dry_run,
+                    leader_check,
+                )
+                .await?;
                 if show_status && !dry_run {
                     status_command(&state).await?;
                 }

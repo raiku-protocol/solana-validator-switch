@@ -46,6 +46,37 @@ impl ConditionalSpinner {
     }
 }
 
+/// Default minimum idle window (no leader slots) required before switching.
+/// A full switch completes in 25-40s with a 15-25s voting gap; 60s leaves
+/// comfortable margin while still finding a window even for validators with
+/// frequent leader slots.
+pub const DEFAULT_MIN_IDLE_TIME_SECS: u64 = 60;
+/// How often to re-check the leader schedule while waiting for a window.
+const LEADER_CHECK_POLL_INTERVAL_SECS: u64 = 10;
+/// Give up waiting and proceed (with a loud warning) after this long, so a
+/// remote/automated invocation can never hang forever.
+const LEADER_CHECK_MAX_WAIT_SECS: u64 = 30 * 60;
+/// Consecutive RPC failures tolerated before proceeding without the check.
+const LEADER_CHECK_MAX_RPC_FAILURES: u32 = 3;
+
+/// `agave-validator wait-for-restart-window`-style gate applied before a
+/// planned switch. Emergency failover bypasses this by driving the
+/// `SwitchManager` steps directly.
+#[derive(Debug, Clone, Copy)]
+pub struct LeaderCheckSettings {
+    pub enabled: bool,
+    pub min_idle_time_secs: u64,
+}
+
+impl Default for LeaderCheckSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_idle_time_secs: DEFAULT_MIN_IDLE_TIME_SECS,
+        }
+    }
+}
+
 fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
@@ -69,6 +100,21 @@ pub async fn switch_command_with_confirmation(
     dry_run: bool,
     app_state: &mut crate::AppState,
     require_confirmation: bool,
+) -> Result<bool> {
+    switch_command_with_options(
+        dry_run,
+        app_state,
+        require_confirmation,
+        LeaderCheckSettings::default(),
+    )
+    .await
+}
+
+pub async fn switch_command_with_options(
+    dry_run: bool,
+    app_state: &mut crate::AppState,
+    require_confirmation: bool,
+    leader_check: LeaderCheckSettings,
 ) -> Result<bool> {
     // Validate we have at least one validator configured
     if app_state.config.validators.is_empty() {
@@ -366,6 +412,7 @@ pub async fn switch_command_with_confirmation(
         app_state.ssh_pool.clone(),
         app_state.detected_ssh_keys.clone(),
     );
+    switch_manager.leader_check = leader_check;
 
     // Pre-warm SSH connections to both nodes for faster switching
     if !dry_run {
@@ -538,6 +585,7 @@ pub(crate) struct SwitchManager {
     validator_pair: crate::types::ValidatorPair,
     ssh_pool: Arc<crate::ssh::AsyncSshPool>,
     detected_ssh_keys: std::collections::HashMap<String, String>,
+    leader_check: LeaderCheckSettings,
     tower_file_name: Option<String>,
     tower_transfer_time: Option<Duration>,
     identity_switch_time: Option<Duration>,
@@ -560,6 +608,7 @@ impl SwitchManager {
             validator_pair,
             ssh_pool,
             detected_ssh_keys,
+            leader_check: LeaderCheckSettings::default(),
             tower_file_name: None,
             tower_transfer_time: None,
             identity_switch_time: None,
@@ -597,6 +646,123 @@ impl SwitchManager {
             .await?;
 
         crate::executable_utils::extract_firedancer_config_path(&process_info)
+    }
+
+    /// Wait until the funded identity has no leader slots for at least
+    /// `min_idle_time_secs`. Mirrors `agave-validator wait-for-restart-window
+    /// --min-idle-time X` but in seconds, sized for a 25-40s switch rather
+    /// than a full validator restart.
+    ///
+    /// Fails closed: if the schedule can't be fetched or no idle window is
+    /// found within the maximum wait, the switch aborts (before any identity
+    /// change) rather than proceeding on incomplete information. Operators
+    /// who want to switch regardless must opt out with --skip-leader-check.
+    async fn wait_for_restart_window(&self, dry_run: bool) -> Result<()> {
+        if !self.leader_check.enabled {
+            println_if_not_silent!(
+                "\n{}",
+                "⏭️  Leader schedule check skipped (--skip-leader-check)".dimmed()
+            );
+            return Ok(());
+        }
+
+        let min_idle_secs = self.leader_check.min_idle_time_secs;
+        let min_idle_slots = (min_idle_secs * 1000).div_ceil(crate::solana_rpc::MS_PER_SLOT);
+        let rpc_url = &self.validator_pair.rpc;
+        let identity = &self.validator_pair.identity_pubkey;
+
+        println_if_not_silent!(
+            "\n{}",
+            format!(
+                "⏳ Checking leader schedule (need ≥{}s / {} slots without leader duty)...",
+                min_idle_secs, min_idle_slots
+            )
+            .bright_blue()
+        );
+
+        let wait_start = Instant::now();
+        let mut rpc_failures: u32 = 0;
+        let mut waiting_logged = false;
+
+        loop {
+            let window = match crate::solana_rpc::fetch_leader_window(rpc_url, identity).await {
+                Ok(window) => {
+                    rpc_failures = 0;
+                    window
+                }
+                Err(e) => {
+                    rpc_failures += 1;
+                    if rpc_failures >= LEADER_CHECK_MAX_RPC_FAILURES {
+                        return Err(anyhow!(
+                            "Could not fetch leader schedule after {} attempts: {}. \
+                            Switch aborted before any identity change. \
+                            Use --skip-leader-check to switch without the restart window check.",
+                            rpc_failures,
+                            e
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+
+            match window.idle_slots() {
+                None => {
+                    println_if_not_silent!(
+                        "   ✓ No upcoming leader slots for {} — restart window open",
+                        identity
+                    );
+                    return Ok(());
+                }
+                Some(idle_slots) if idle_slots >= min_idle_slots => {
+                    let idle_secs = idle_slots * crate::solana_rpc::MS_PER_SLOT / 1000;
+                    println_if_not_silent!(
+                        "   ✓ Next leader slot {} in ~{}s ({} slots) — restart window open",
+                        window.next_leader_slot.unwrap_or_default(),
+                        idle_secs,
+                        idle_slots
+                    );
+                    return Ok(());
+                }
+                Some(idle_slots) => {
+                    let eta_secs = idle_slots * crate::solana_rpc::MS_PER_SLOT / 1000;
+                    if dry_run {
+                        println_if_not_silent!(
+                            "   {}",
+                            format!(
+                                "⚠️  Next leader slot in ~{}s (need ≥{}s idle) — a live switch would wait here",
+                                eta_secs, min_idle_secs
+                            )
+                            .yellow()
+                        );
+                        return Ok(());
+                    }
+                    if wait_start.elapsed().as_secs() >= LEADER_CHECK_MAX_WAIT_SECS {
+                        return Err(anyhow!(
+                            "No {}s idle window found in the leader schedule after {} minutes. \
+                            Switch aborted before any identity change. \
+                            Lower --min-idle-time or use --skip-leader-check to switch anyway.",
+                            min_idle_secs,
+                            LEADER_CHECK_MAX_WAIT_SECS / 60
+                        ));
+                    }
+                    if !waiting_logged {
+                        println_if_not_silent!(
+                            "   ⏳ Waiting for restart window (Ctrl+C to abort)..."
+                        );
+                        waiting_logged = true;
+                    }
+                    println_if_not_silent!(
+                        "      next leader slot {} in ~{}s (need ≥{}s idle), rechecking in {}s",
+                        window.next_leader_slot.unwrap_or_default(),
+                        eta_secs,
+                        min_idle_secs,
+                        LEADER_CHECK_POLL_INTERVAL_SECS
+                    );
+                    tokio::time::sleep(Duration::from_secs(LEADER_CHECK_POLL_INTERVAL_SECS)).await;
+                }
+            }
+        }
     }
 
     async fn execute_switch(&mut self, dry_run: bool, require_confirmation: bool) -> Result<bool> {
@@ -658,6 +824,13 @@ impl SwitchManager {
             // Ensure output is flushed after confirmation
             std::io::stdout().flush()?;
         }
+
+        // Hold the switch until the identity has an idle window in the leader
+        // schedule (same idea as `agave-validator wait-for-restart-window`),
+        // so the identity handoff never overlaps our block production slots.
+        // Runs after the confirmation prompt: the window is checked against
+        // the schedule as it stands once the operator has already said yes.
+        self.wait_for_restart_window(dry_run).await?;
 
         // Start timing the entire switch operation
         let total_switch_start = Instant::now();
