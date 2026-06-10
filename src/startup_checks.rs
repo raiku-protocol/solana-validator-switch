@@ -16,7 +16,7 @@ fn strip_ansi(s: &str) -> String {
         if c == '\x1b' {
             if chars.peek() == Some(&'[') {
                 chars.next(); // consume '['
-                // consume digits, semicolons until we hit an ASCII letter
+                              // consume digits, semicolons until we hit an ASCII letter
                 while let Some(&next) = chars.peek() {
                     chars.next();
                     if next.is_ascii_alphabetic() {
@@ -150,8 +150,7 @@ fn extract_firedancer_config_path_from_ps_output(process_info: &str) -> Result<S
             let flag = w[0].trim_matches(|c: char| c == '\'' || c == '"');
             if flag == "--config" {
                 Some(
-                    w[1]
-                        .trim_matches(|c: char| c == '\'' || c == '"')
+                    w[1].trim_matches(|c: char| c == '\'' || c == '"')
                         .to_string(),
                 )
             } else {
@@ -437,8 +436,7 @@ async fn check_firedancer_identity_config(
     let config_path = extract_firedancer_config_path_from_ps_output(&process_info)?;
     let config_content =
         fetch_firedancer_config_via_ssh(ssh_pool, &node.node, ssh_key, &config_path).await?;
-    let (identity_path, authorized_voter_path) =
-        parse_firedancer_consensus_paths(&config_content)?;
+    let (identity_path, authorized_voter_path) = parse_firedancer_consensus_paths(&config_content)?;
 
     if identity_path == authorized_voter_path {
         return Err(anyhow!(
@@ -585,8 +583,7 @@ async fn check_firedancer_identity_config_inline(
     let config_path = extract_firedancer_config_path_from_ps_output(&process_info)?;
     let config_content =
         fetch_firedancer_config_via_ssh(ssh_pool, node, ssh_key, &config_path).await?;
-    let (identity_path, authorized_voter_path) =
-        parse_firedancer_consensus_paths(&config_content)?;
+    let (identity_path, authorized_voter_path) = parse_firedancer_consensus_paths(&config_content)?;
 
     // Check if they're the same
     if identity_path == authorized_voter_path {
@@ -652,7 +649,6 @@ async fn check_agave_identity_config_inline(
     Ok(())
 }
 
-
 #[cfg(test)]
 mod parser_tests {
     //! Unit tests for the Firedancer config parser helpers.
@@ -662,12 +658,15 @@ mod parser_tests {
     //! SSH plumbing. The parser is the load-bearing piece of the safety
     //! check that prevents booting with identity_path == authorized voter.
 
-    use super::{extract_firedancer_config_path_from_ps_output, extract_quoted_value,
-                parse_firedancer_consensus_paths};
+    use super::{
+        extract_firedancer_config_path_from_ps_output, extract_quoted_value,
+        parse_firedancer_consensus_paths,
+    };
 
     fn assert_parsed(content: &str, expected_identity: &str, expected_voter: &str) {
-        let (identity, voter) = parse_firedancer_consensus_paths(content)
-            .unwrap_or_else(|e| panic!("expected parse to succeed but got: {e}\ncontent was:\n{content}"));
+        let (identity, voter) = parse_firedancer_consensus_paths(content).unwrap_or_else(|e| {
+            panic!("expected parse to succeed but got: {e}\ncontent was:\n{content}")
+        });
         assert_eq!(identity, expected_identity, "identity_path mismatch");
         assert_eq!(voter, expected_voter, "authorized_voter_path mismatch");
     }
@@ -799,7 +798,10 @@ identity_path = "/keys/unfunded.json"
 
     #[test]
     fn extract_quoted_value_returns_none_on_no_quotes() {
-        assert_eq!(extract_quoted_value("identity_path = /no/quotes/here"), None);
+        assert_eq!(
+            extract_quoted_value("identity_path = /no/quotes/here"),
+            None
+        );
     }
 
     #[test]
@@ -813,7 +815,8 @@ identity_path = "/keys/unfunded.json"
 
     #[test]
     fn extract_firedancer_config_path_strips_quoted_argument() {
-        let ps = "azureuser  1234  /usr/local/bin/fdctl run \"--config\" \"/etc/fdctl/config.toml\"";
+        let ps =
+            "azureuser  1234  /usr/local/bin/fdctl run \"--config\" \"/etc/fdctl/config.toml\"";
         assert_eq!(
             extract_firedancer_config_path_from_ps_output(ps).unwrap(),
             "/etc/fdctl/config.toml"

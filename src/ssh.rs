@@ -303,17 +303,29 @@ impl AsyncSshPool {
         let output_result = if needs_shell {
             match shell_type {
                 RemoteShellType::Bash => {
-                    timeout(timeout_dur, session.command("bash").arg("-c").arg(command).output()).await
+                    timeout(
+                        timeout_dur,
+                        session.command("bash").arg("-c").arg(command).output(),
+                    )
+                    .await
                 }
                 RemoteShellType::PowerShell => {
                     timeout(
                         timeout_dur,
-                        session.command("powershell").arg("-Command").arg(command).output(),
+                        session
+                            .command("powershell")
+                            .arg("-Command")
+                            .arg(command)
+                            .output(),
                     )
                     .await
                 }
                 RemoteShellType::PowerShellCore => {
-                    timeout(timeout_dur, session.command("pwsh").arg("-c").arg(command).output()).await
+                    timeout(
+                        timeout_dur,
+                        session.command("pwsh").arg("-c").arg(command).output(),
+                    )
+                    .await
                 }
             }
         } else {

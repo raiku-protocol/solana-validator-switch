@@ -2007,12 +2007,10 @@ pub async fn check_node_swap_readiness(
                             .push("Unfunded identity keypair missing or not readable".to_string());
                         all_ready = false;
                     }
-                    "tower_fail" => {
-                        // Only report tower issues for non-standby nodes
-                        if is_standby != Some(true) {
-                            issues.push("Tower file missing".to_string());
-                            all_ready = false;
-                        }
+                    // Only report tower issues for non-standby nodes
+                    "tower_fail" if is_standby != Some(true) => {
+                        issues.push("Tower file missing".to_string());
+                        all_ready = false;
                     }
                     "ledger_fail" => {
                         issues.push("Ledger directory missing or not writable".to_string());

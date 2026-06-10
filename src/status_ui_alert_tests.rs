@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod status_ui_alert_tests {
-    use crate::commands::status_ui_v2::{build_verbose_log_message, LogLevel};
     use crate::alert::AlertTracker;
+    use crate::commands::status_ui_v2::{build_verbose_log_message, LogLevel};
     use crate::commands::status_ui_v2::{
         classify_get_health_low_priority_state, get_health_low_priority_alert_decision,
         should_send_get_health_low_priority_alert,
@@ -374,8 +374,6 @@ validators: []
             30,
         ));
     }
-
-
 
     #[test]
     fn test_get_health_alert_decision_routes_standby_unhealthy_to_low_priority() {

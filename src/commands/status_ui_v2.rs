@@ -1,11 +1,11 @@
 use crate::startup::check_node_swap_readiness;
 use anyhow::Result;
+use chrono::Local;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use chrono::Local;
 
 /// Helper for acquiring read lock with timeout
 async fn read_lock_with_timeout<T>(
@@ -72,17 +72,17 @@ async fn refresh_vote_data_for_alerts(
     // Fetch vote data for all validators
     for (idx, validator_status) in app_state.validator_statuses.iter().enumerate() {
         let validator_pair = &validator_status.validator_pair;
-        
-            // Use active node label for better identification
-            let node_label = if let Some(node_with_status) = validator_status
-                .nodes_with_status
-                .iter()
-                .find(|n| n.status == crate::types::NodeStatus::Active)
-            {
-                node_with_status.node.label.clone()
-            } else {
-                validator_status.nodes_with_status[0].node.label.clone()
-            };
+
+        // Use active node label for better identification
+        let node_label = if let Some(node_with_status) = validator_status
+            .nodes_with_status
+            .iter()
+            .find(|n| n.status == crate::types::NodeStatus::Active)
+        {
+            node_with_status.node.label.clone()
+        } else {
+            validator_status.nodes_with_status[0].node.label.clone()
+        };
 
         match fetch_vote_account_data(&validator_pair.rpc, &validator_pair.vote_pubkey).await {
             Ok(data) => {
@@ -98,8 +98,8 @@ async fn refresh_vote_data_for_alerts(
                 let _ = log_sender.send(LogMessage {
                     host: validator_log_host(&app_state, idx),
                     message: format!(
-                            "[{}] Vote data fetched: last slot {}",
-                            node_label,
+                        "[{}] Vote data fetched: last slot {}",
+                        node_label,
                         data.recent_votes.last().map(|v| v.slot).unwrap_or(0)
                     ),
                     timestamp: Instant::now(),
@@ -132,17 +132,16 @@ async fn refresh_vote_data_for_alerts(
                             .map(|c| c.rpc_failure_threshold_seconds)
                             .unwrap_or(30);
 
-                        let should_alert = seconds >= threshold
-                            && {
-                                let tracker_mutex = ALERT_TRACKER.get_or_init(|| {
-                                    Mutex::new(ComprehensiveAlertTracker::new(
-                                        app_state.validator_statuses.len(),
-                                        2,
-                                    ))
-                                });
-                                let mut tracker = tracker_mutex.lock().unwrap();
-                                tracker.rpc_failure_tracker.should_send_alert(idx)
-                            };
+                        let should_alert = seconds >= threshold && {
+                            let tracker_mutex = ALERT_TRACKER.get_or_init(|| {
+                                Mutex::new(ComprehensiveAlertTracker::new(
+                                    app_state.validator_statuses.len(),
+                                    2,
+                                ))
+                            });
+                            let mut tracker = tracker_mutex.lock().unwrap();
+                            tracker.rpc_failure_tracker.should_send_alert(idx)
+                        };
 
                         (should_alert, consecutive, seconds)
                     } else {
@@ -176,7 +175,10 @@ async fn refresh_vote_data_for_alerts(
 
                 let _ = log_sender.send(LogMessage {
                     host: validator_log_host(&app_state, idx),
-                        message: format!("[{}] Failed to fetch vote data: {}", node_label, error_message),
+                    message: format!(
+                        "[{}] Failed to fetch vote data: {}",
+                        node_label, error_message
+                    ),
                     timestamp: Instant::now(),
                     level: LogLevel::Error,
                 });
@@ -184,7 +186,6 @@ async fn refresh_vote_data_for_alerts(
                 new_vote_data.push(None);
             }
         }
-
     }
 
     // Spawn background health checks for each node: log getHealth and send
@@ -236,12 +237,18 @@ async fn refresh_vote_data_for_alerts(
 
                     if let Some(ssh_key) = ssh_key_opt {
                         let rpc_port = crate::validator_rpc::get_rpc_port(validator_type, None);
-                        match crate::validator_rpc::get_health(&*ssh_pool, &node, &ssh_key, rpc_port).await {
+                        match crate::validator_rpc::get_health(&ssh_pool, &node, &ssh_key, rpc_port)
+                            .await
+                        {
                             Ok(is_healthy) => {
                                 // Update UI state rpc health
                                 if let Ok(mut st) = ui_state_local.try_write() {
                                     if let Some(pair) = st.rpc_health_data.get_mut(vidx) {
-                                        let rpc_status = if nidx == 0 { &mut pair.node_0 } else { &mut pair.node_1 };
+                                        let rpc_status = if nidx == 0 {
+                                            &mut pair.node_0
+                                        } else {
+                                            &mut pair.node_1
+                                        };
                                         rpc_status.is_healthy = is_healthy;
                                         rpc_status.last_check = Some(Instant::now());
                                         rpc_status.error_message = None;
@@ -251,9 +258,16 @@ async fn refresh_vote_data_for_alerts(
 
                                 let _ = log_sender.send(LogMessage {
                                     host: host_tag.clone(),
-                                    message: format!("getHealth -> {}", if is_healthy { "Healthy" } else { "Unhealthy" }),
+                                    message: format!(
+                                        "getHealth -> {}",
+                                        if is_healthy { "Healthy" } else { "Unhealthy" }
+                                    ),
                                     timestamp: Instant::now(),
-                                    level: if is_healthy { LogLevel::Info } else { LogLevel::Warning },
+                                    level: if is_healthy {
+                                        LogLevel::Info
+                                    } else {
+                                        LogLevel::Warning
+                                    },
                                 });
 
                                 // If standby getHealth reports unhealthy, route through the
@@ -261,7 +275,10 @@ async fn refresh_vote_data_for_alerts(
                                 if !is_healthy && node_status == crate::types::NodeStatus::Standby {
                                     if let Some(am) = alert_mgr.as_ref() {
                                         let tracker_mutex = ALERT_TRACKER.get_or_init(|| {
-                                            Mutex::new(ComprehensiveAlertTracker::new(validator_count, 2))
+                                            Mutex::new(ComprehensiveAlertTracker::new(
+                                                validator_count,
+                                                2,
+                                            ))
                                         });
                                         let (decision, remaining_seconds) = {
                                             let mut tracker = tracker_mutex.lock().unwrap();
@@ -274,13 +291,17 @@ async fn refresh_vote_data_for_alerts(
                                                 vidx,
                                             );
                                             let remaining = if decision.is_none() {
-                                                tracker.rpc_failure_tracker.seconds_until_next_alert(vidx).unwrap_or(0)
+                                                tracker
+                                                    .rpc_failure_tracker
+                                                    .seconds_until_next_alert(vidx)
+                                                    .unwrap_or(0)
                                             } else {
                                                 0
                                             };
                                             (decision, remaining)
                                         };
-                                        if let Some((health_state, seconds_since_first)) = decision {
+                                        if let Some((health_state, seconds_since_first)) = decision
+                                        {
                                             let identity = validator_identity_for_task.clone();
                                             let res = am
                                                 .send_get_health_alert_low_priority(
@@ -302,7 +323,8 @@ async fn refresh_vote_data_for_alerts(
                                             } else {
                                                 let _ = log_sender.send(LogMessage {
                                                     host: host_tag.clone(),
-                                                    message: "LOW-PRIORITY getHealth alert sent".to_string(),
+                                                    message: "LOW-PRIORITY getHealth alert sent"
+                                                        .to_string(),
                                                     timestamp: Instant::now(),
                                                     level: LogLevel::Warning,
                                                 });
@@ -325,7 +347,11 @@ async fn refresh_vote_data_for_alerts(
                                     let mut start = None;
                                     if let Ok(mut st) = ui_state_local.try_write() {
                                         if let Some(pair) = st.rpc_health_data.get_mut(vidx) {
-                                            let rpc_status = if nidx == 0 { &mut pair.node_0 } else { &mut pair.node_1 };
+                                            let rpc_status = if nidx == 0 {
+                                                &mut pair.node_0
+                                            } else {
+                                                &mut pair.node_1
+                                            };
                                             rpc_status.is_healthy = false;
                                             rpc_status.last_check = Some(Instant::now());
                                             rpc_status.error_message = Some(error_text.clone());
@@ -342,14 +368,20 @@ async fn refresh_vote_data_for_alerts(
                                     let elapsed = start.elapsed().as_secs();
                                     let _ = log_sender.send(LogMessage {
                                         host: host_tag.clone(),
-                                        message: format!("getHealth -> Unreachable: {} ({}s)", error_text, elapsed),
+                                        message: format!(
+                                            "getHealth -> Unreachable: {} ({}s)",
+                                            error_text, elapsed
+                                        ),
                                         timestamp: Instant::now(),
                                         level: LogLevel::Error,
                                     });
 
                                     if let Some(am) = alert_mgr.as_ref() {
                                         let tracker_mutex = ALERT_TRACKER.get_or_init(|| {
-                                            Mutex::new(ComprehensiveAlertTracker::new(validator_count, 2))
+                                            Mutex::new(ComprehensiveAlertTracker::new(
+                                                validator_count,
+                                                2,
+                                            ))
                                         });
                                         let (decision, remaining_rpc) = {
                                             let mut tracker = tracker_mutex.lock().unwrap();
@@ -362,14 +394,18 @@ async fn refresh_vote_data_for_alerts(
                                                 vidx,
                                             );
                                             let remaining = if decision.is_none() {
-                                                tracker.rpc_failure_tracker.seconds_until_next_alert(vidx).unwrap_or(0)
+                                                tracker
+                                                    .rpc_failure_tracker
+                                                    .seconds_until_next_alert(vidx)
+                                                    .unwrap_or(0)
                                             } else {
                                                 0
                                             };
                                             (decision, remaining)
                                         };
 
-                                        if let Some((health_state, seconds_since_first)) = decision {
+                                        if let Some((health_state, seconds_since_first)) = decision
+                                        {
                                             let identity = validator_identity_for_task.clone();
                                             let res = am
                                                 .send_get_health_alert_low_priority(
@@ -391,7 +427,8 @@ async fn refresh_vote_data_for_alerts(
                                             } else {
                                                 let _ = log_sender.send(LogMessage {
                                                     host: host_tag.clone(),
-                                                    message: "LOW-PRIORITY getHealth alert sent".to_string(),
+                                                    message: "LOW-PRIORITY getHealth alert sent"
+                                                        .to_string(),
                                                     timestamp: Instant::now(),
                                                     level: LogLevel::Warning,
                                                 });
@@ -411,7 +448,8 @@ async fn refresh_vote_data_for_alerts(
                     } else {
                         let _ = log_sender.send(LogMessage {
                             host: host_tag.clone(),
-                            message: "No SSH key configured for host; skipping getHealth".to_string(),
+                            message: "No SSH key configured for host; skipping getHealth"
+                                .to_string(),
                             timestamp: Instant::now(),
                             level: LogLevel::Error,
                         });
@@ -503,7 +541,15 @@ async fn refresh_vote_data_for_alerts(
             let mut tracker = tracker_mutex.lock().unwrap();
 
             // Collect alerts to send without holding locks while awaiting network calls
-            let mut alerts_to_send: Vec<(usize, bool, crate::types::NodeConfig, u64, u64, NodeHealthStatus, bool)> = Vec::new();
+            let mut alerts_to_send: Vec<(
+                usize,
+                bool,
+                crate::types::NodeConfig,
+                u64,
+                u64,
+                NodeHealthStatus,
+                bool,
+            )> = Vec::new();
 
             for (idx, last) in state.last_vote_slot_times.iter().enumerate() {
                 if let Some((last_slot, last_instant)) = last {
@@ -515,22 +561,27 @@ async fn refresh_vote_data_for_alerts(
                         .map(|c| c.delinquency_threshold_seconds)
                         .unwrap_or(30);
 
-
                     // Log delinquency check for debugging
                     let _ = log_sender.send(LogMessage {
                         host: validator_log_host(&app_state, idx),
-                            message: format!("[{}] Delinquency check: {} seconds without vote (threshold: {}s)", 
-                                // Use active node label for identification
-                                if let Some(node_with_status) = app_state.validator_statuses[idx]
-                                    .nodes_with_status
-                                    .iter()
-                                    .find(|n| n.status == crate::types::NodeStatus::Active)
-                                {
-                                    node_with_status.node.label.as_str()
-                                } else {
-                                    app_state.validator_statuses[idx].nodes_with_status[0].node.label.as_str()
-                                },
-                                seconds_since_vote, threshold),
+                        message: format!(
+                            "[{}] Delinquency check: {} seconds without vote (threshold: {}s)",
+                            // Use active node label for identification
+                            if let Some(node_with_status) = app_state.validator_statuses[idx]
+                                .nodes_with_status
+                                .iter()
+                                .find(|n| n.status == crate::types::NodeStatus::Active)
+                            {
+                                node_with_status.node.label.as_str()
+                            } else {
+                                app_state.validator_statuses[idx].nodes_with_status[0]
+                                    .node
+                                    .label
+                                    .as_str()
+                            },
+                            seconds_since_vote,
+                            threshold
+                        ),
                         timestamp: Instant::now(),
                         level: LogLevel::Info,
                     });
@@ -602,7 +653,9 @@ async fn refresh_vote_data_for_alerts(
                         {
                             node_with_status.node.clone()
                         } else {
-                            app_state.validator_statuses[idx].nodes_with_status[0].node.clone()
+                            app_state.validator_statuses[idx].nodes_with_status[0]
+                                .node
+                                .clone()
                         };
 
                         // Determine priority by role: if active node is reporting as Active, it's high priority; otherwise low
@@ -613,7 +666,15 @@ async fn refresh_vote_data_for_alerts(
                         let is_backup = !is_active;
                         let node_health = state.validator_health[idx].clone();
 
-                        alerts_to_send.push((idx, is_backup, active_node, *last_slot, seconds_since_vote, node_health, is_active));
+                        alerts_to_send.push((
+                            idx,
+                            is_backup,
+                            active_node,
+                            *last_slot,
+                            seconds_since_vote,
+                            node_health,
+                            is_active,
+                        ));
                     }
                 }
             }
@@ -621,16 +682,32 @@ async fn refresh_vote_data_for_alerts(
             // Release tracker lock before awaiting network calls
             drop(tracker);
 
-            for (idx, is_backup, active_node, last_slot, seconds_since_vote, node_health, is_active) in alerts_to_send {
+            for (
+                idx,
+                is_backup,
+                active_node,
+                last_slot,
+                seconds_since_vote,
+                node_health,
+                is_active,
+            ) in alerts_to_send
+            {
                 let alert_mgr = alert_mgr.clone();
                 let log_sender = log_sender.clone();
-                let identity = app_state.validator_statuses[idx].validator_pair.identity_pubkey.clone();
+                let identity = app_state.validator_statuses[idx]
+                    .validator_pair
+                    .identity_pubkey
+                    .clone();
                 // Pre-send log: record alert intent and priority
                 let _ = log_sender.send(LogMessage {
                     host: validator_log_host(&app_state, idx),
                     message: format!(
                         "Preparing to send {} delinquency alert for {}: {}s without vote",
-                        if is_backup { "LOW-PRIORITY" } else { "HIGH-PRIORITY" },
+                        if is_backup {
+                            "LOW-PRIORITY"
+                        } else {
+                            "HIGH-PRIORITY"
+                        },
                         active_node.label,
                         seconds_since_vote
                     ),
@@ -664,14 +741,30 @@ async fn refresh_vote_data_for_alerts(
                     if let Err(e) = res {
                         let _ = log_sender.send(LogMessage {
                             host: active_node.label.clone(),
-                            message: format!("Failed to send {} delinquency alert: {}", if is_backup { "LOW-PRIORITY" } else { "HIGH-PRIORITY" }, e),
+                            message: format!(
+                                "Failed to send {} delinquency alert: {}",
+                                if is_backup {
+                                    "LOW-PRIORITY"
+                                } else {
+                                    "HIGH-PRIORITY"
+                                },
+                                e
+                            ),
                             timestamp: Instant::now(),
                             level: LogLevel::Error,
                         });
                     } else {
                         let _ = log_sender.send(LogMessage {
                             host: active_node.label.clone(),
-                            message: format!("{} delinquency alert sent: {} seconds without vote", if is_backup { "LOW-PRIORITY" } else { "HIGH-PRIORITY" }, seconds_since_vote),
+                            message: format!(
+                                "{} delinquency alert sent: {} seconds without vote",
+                                if is_backup {
+                                    "LOW-PRIORITY"
+                                } else {
+                                    "HIGH-PRIORITY"
+                                },
+                                seconds_since_vote
+                            ),
                             timestamp: Instant::now(),
                             level: LogLevel::Warning,
                         });
@@ -897,7 +990,7 @@ async fn handle_validator_switch_with_timeout(
     // Spawn the refresh operation without blocking
     let log_sender_clone = log_sender.clone();
     tokio::spawn(async move {
-        refresh_all_fields(app_state_clone, ui_state_clone, log_sender_clone).await;    
+        refresh_all_fields(app_state_clone, ui_state_clone, log_sender_clone).await;
     });
 
     Ok(())
@@ -1153,7 +1246,9 @@ pub(crate) fn get_health_low_priority_alert_decision(
     idx: usize,
 ) -> Option<(&'static str, u64)> {
     let state = classify_get_health_low_priority_state(node_status, is_healthy, error)?;
-    let seconds_since_first = failure_start.map(|start| start.elapsed().as_secs()).unwrap_or(0);
+    let seconds_since_first = failure_start
+        .map(|start| start.elapsed().as_secs())
+        .unwrap_or(0);
     if should_send_get_health_low_priority_alert(tracker, idx, seconds_since_first) {
         Some((state, seconds_since_first))
     } else {
@@ -1208,9 +1303,8 @@ const PRIMARY_SLOW_CHECK_INTERVAL: Duration = Duration::from_secs(600);
 
 /// Per-(validator, node, check_kind) timestamp of the last time we let a slow
 /// primary check run. Used by `should_throttle_primary_check` below.
-static PRIMARY_CHECK_TIMESTAMPS: OnceLock<
-    Mutex<std::collections::HashMap<(usize, usize, &'static str), Instant>>,
-> = OnceLock::new();
+type PrimaryCheckTimestampMap = std::collections::HashMap<(usize, usize, &'static str), Instant>;
+static PRIMARY_CHECK_TIMESTAMPS: OnceLock<Mutex<PrimaryCheckTimestampMap>> = OnceLock::new();
 
 /// Returns true if a periodic check should be skipped on the primary because
 /// we last ran it less than `interval` ago.
@@ -1230,8 +1324,7 @@ fn should_throttle_primary_check(
     if *node_status != crate::types::NodeStatus::Active {
         return false;
     }
-    let map = PRIMARY_CHECK_TIMESTAMPS
-        .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let map = PRIMARY_CHECK_TIMESTAMPS.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
     let mut guard = map.lock().unwrap();
     let key = (validator_idx, node_idx, check_kind);
     match guard.get(&key) {
@@ -1274,8 +1367,7 @@ fn should_throttle_primary_check(
 /// we want the next 10 s tick to re-check this node at backup cadence
 /// regardless of any throttle window it would otherwise be subject to.
 fn clear_throttle_timestamps_for_node(validator_idx: usize, node_idx: usize) {
-    let map = PRIMARY_CHECK_TIMESTAMPS
-        .get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    let map = PRIMARY_CHECK_TIMESTAMPS.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
     let mut guard = map.lock().unwrap();
     guard.retain(|(vidx, nidx, _), _| !(*vidx == validator_idx && *nidx == node_idx));
 }
@@ -1335,7 +1427,10 @@ impl EnhancedStatusApp {
                 };
 
                 let timestamp = Local::now().format("%H:%M:%S%.3f");
-                let line = format!("[{}] [{}] {}: {}\n", timestamp, level, message.host, message.message);
+                let line = format!(
+                    "[{}] [{}] {}: {}\n",
+                    timestamp, level, message.host, message.message
+                );
 
                 if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                     let _ = file.write_all(line.as_bytes());
@@ -1862,16 +1957,16 @@ pub async fn run_enhanced_ui(app: &mut EnhancedStatusApp) -> Result<bool> {
         while let Ok(action) = action_rx.try_recv() {
             _last_action_time = Instant::now();
 
-                process_ui_action(
-                    action,
-                    &app.ui_state,
-                    &app.should_quit,
-                    &app.view_state,
-                    &app.app_state,
-                    &app.switch_confirmed,
-                    &app.log_sender,
-                )
-                .await?;
+            process_ui_action(
+                action,
+                &app.ui_state,
+                &app.should_quit,
+                &app.view_state,
+                &app.app_state,
+                &app.switch_confirmed,
+                &app.log_sender,
+            )
+            .await?;
         }
 
         // Check for quit signal with timeout to prevent blocking
@@ -2427,8 +2522,7 @@ fn draw_single_node_table(
         if let Some(vote_data) = vote_data {
             if let Some(metrics) = &vote_data.tvc_metrics {
                 // TVC Rank
-                let rank_pct =
-                    metrics.tvc_rank as f64 / metrics.total_validators.max(1) as f64;
+                let rank_pct = metrics.tvc_rank as f64 / metrics.total_validators.max(1) as f64;
                 let rank_color = if rank_pct <= 0.10 {
                     Color::Green
                 } else if rank_pct <= 0.50 {
@@ -2482,48 +2576,21 @@ fn draw_single_node_table(
                 ]));
             } else {
                 // Active but metrics not available
-                rows.push(Row::new(vec![
-                    Cell::from("TVC Rank"),
-                    Cell::from("-"),
-                ]));
-                rows.push(Row::new(vec![
-                    Cell::from("Vote Latency"),
-                    Cell::from("-"),
-                ]));
-                rows.push(Row::new(vec![
-                    Cell::from("Missed Votes"),
-                    Cell::from("-"),
-                ]));
+                rows.push(Row::new(vec![Cell::from("TVC Rank"), Cell::from("-")]));
+                rows.push(Row::new(vec![Cell::from("Vote Latency"), Cell::from("-")]));
+                rows.push(Row::new(vec![Cell::from("Missed Votes"), Cell::from("-")]));
             }
         } else {
             // Active but no vote data
-            rows.push(Row::new(vec![
-                Cell::from("TVC Rank"),
-                Cell::from("-"),
-            ]));
-            rows.push(Row::new(vec![
-                Cell::from("Vote Latency"),
-                Cell::from("-"),
-            ]));
-            rows.push(Row::new(vec![
-                Cell::from("Missed Votes"),
-                Cell::from("-"),
-            ]));
+            rows.push(Row::new(vec![Cell::from("TVC Rank"), Cell::from("-")]));
+            rows.push(Row::new(vec![Cell::from("Vote Latency"), Cell::from("-")]));
+            rows.push(Row::new(vec![Cell::from("Missed Votes"), Cell::from("-")]));
         }
     } else {
         // Standby node
-        rows.push(Row::new(vec![
-            Cell::from("TVC Rank"),
-            Cell::from("-"),
-        ]));
-        rows.push(Row::new(vec![
-            Cell::from("Vote Latency"),
-            Cell::from("-"),
-        ]));
-        rows.push(Row::new(vec![
-            Cell::from("Missed Votes"),
-            Cell::from("-"),
-        ]));
+        rows.push(Row::new(vec![Cell::from("TVC Rank"), Cell::from("-")]));
+        rows.push(Row::new(vec![Cell::from("Vote Latency"), Cell::from("-")]));
+        rows.push(Row::new(vec![Cell::from("Missed Votes"), Cell::from("-")]));
     }
 
     // Section separator before SSH
@@ -3642,7 +3709,14 @@ async fn refresh_validator_fields(
             // Small delay to ensure UI shows loading state
             tokio::time::sleep(Duration::from_millis(50)).await;
 
-            refresh_swap_readiness(app_state_clone, ui_state_clone, validator_idx, node_idx, log_sender_clone).await;
+            refresh_swap_readiness(
+                app_state_clone,
+                ui_state_clone,
+                validator_idx,
+                node_idx,
+                log_sender_clone,
+            )
+            .await;
         }));
     }
 
@@ -3769,9 +3843,8 @@ async fn refresh_rpc_health(
                     }
                     Some(false) => {
                         rpc_status.is_healthy = false;
-                        rpc_status.error_message = Some(
-                            "Primary not voting per cluster vote-account status".to_string(),
-                        );
+                        rpc_status.error_message =
+                            Some("Primary not voting per cluster vote-account status".to_string());
                         if rpc_status.failure_start.is_none() {
                             rpc_status.failure_start = Some(Instant::now());
                         }
@@ -3861,6 +3934,10 @@ async fn refresh_rpc_health(
 }
 
 /// Refresh node status and identity
+// The arguments mirror the per-node refresh context threaded through every
+// background task in this module; bundling them into a struct for one call
+// site isn't worth the indirection.
+#[allow(clippy::too_many_arguments)]
 async fn refresh_node_status_and_identity(
     validator_idx: usize,
     node_idx: usize,
@@ -4188,10 +4265,8 @@ async fn refresh_node_status_and_identity(
                     .map(|n| n.node.label.clone())
                     .unwrap_or_default();
                 let mut sibling_labels: Vec<String> = Vec::new();
-                for (sibling_idx, sibling) in validator_status
-                    .nodes_with_status
-                    .iter_mut()
-                    .enumerate()
+                for (sibling_idx, sibling) in
+                    validator_status.nodes_with_status.iter_mut().enumerate()
                 {
                     if sibling_idx == node_idx {
                         continue;
@@ -4560,7 +4635,6 @@ pub async fn show_enhanced_status_ui(app_state: &AppState) -> Result<()> {
     Ok(())
 }
 
-
 #[cfg(test)]
 mod throttle_tests {
     //! Unit tests for `should_throttle_primary_check`.
@@ -4808,38 +4882,19 @@ mod throttle_tests {
         clear_throttle_timestamps_for_node(99, 0);
 
         assert!(
-            !should_throttle_primary_check(
-                &NodeStatus::Active,
-                99,
-                0,
-                kind_a,
-                TEST_INTERVAL,
-            ),
+            !should_throttle_primary_check(&NodeStatus::Active, 99, 0, kind_a, TEST_INTERVAL,),
             "after clear_throttle_timestamps_for_node(99, 0), kind_a on (99, 0) must run"
         );
         assert!(
-            !should_throttle_primary_check(
-                &NodeStatus::Active,
-                99,
-                0,
-                kind_b,
-                TEST_INTERVAL,
-            ),
+            !should_throttle_primary_check(&NodeStatus::Active, 99, 0, kind_b, TEST_INTERVAL,),
             "after clear_throttle_timestamps_for_node(99, 0), kind_b on (99, 0) must run"
         );
         assert!(
-            should_throttle_primary_check(
-                &NodeStatus::Active,
-                99,
-                1,
-                kind_a,
-                TEST_INTERVAL,
-            ),
+            should_throttle_primary_check(&NodeStatus::Active, 99, 1, kind_a, TEST_INTERVAL,),
             "clear_throttle_timestamps_for_node(99, 0) must not affect the sibling (99, 1)"
         );
     }
 }
-
 
 #[cfg(test)]
 mod refresh_sync_tests {
@@ -4994,7 +5049,9 @@ mod refresh_sync_tests {
 
 #[cfg(test)]
 mod delinquency_gate_tests {
-    use super::{should_send_high_priority_delinquency_alert, vote_rpc_failure_taints_last_vote_time};
+    use super::{
+        should_send_high_priority_delinquency_alert, vote_rpc_failure_taints_last_vote_time,
+    };
     use crate::alert::AlertTracker;
     use std::time::Instant;
 
@@ -5070,10 +5127,11 @@ mod delinquency_gate_tests {
     }
 }
 
-
 #[cfg(test)]
 mod vote_account_poll_interval_tests {
-    use super::{node_status_poll_interval_seconds, status_refresh_text, vote_account_poll_interval_seconds};
+    use super::{
+        node_status_poll_interval_seconds, status_refresh_text, vote_account_poll_interval_seconds,
+    };
     use crate::types::AlertConfig;
     use std::time::{Duration, Instant};
 
@@ -5107,7 +5165,6 @@ mod vote_account_poll_interval_tests {
         let config = alert_config_with_poll_interval(0);
         assert_eq!(vote_account_poll_interval_seconds(Some(&config)), 1);
     }
-
 
     #[test]
     fn node_status_poll_interval_defaults_to_previous_ten_seconds() {
