@@ -53,10 +53,10 @@ impl ConditionalSpinner {
 pub const DEFAULT_MIN_IDLE_TIME_SECS: u64 = 60;
 /// How often to re-check the leader schedule while waiting for a window.
 const LEADER_CHECK_POLL_INTERVAL_SECS: u64 = 10;
-/// Give up waiting and proceed (with a loud warning) after this long, so a
+/// Abort the switch if no idle window is found within this long, so a
 /// remote/automated invocation can never hang forever.
 const LEADER_CHECK_MAX_WAIT_SECS: u64 = 30 * 60;
-/// Consecutive RPC failures tolerated before proceeding without the check.
+/// Consecutive RPC failures tolerated before aborting the switch.
 const LEADER_CHECK_MAX_RPC_FAILURES: u32 = 3;
 
 /// `agave-validator wait-for-restart-window`-style gate applied before a
