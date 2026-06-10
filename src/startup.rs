@@ -842,7 +842,6 @@ async fn verify_keypair_files(
     let keypairs = vec![
         (&node.paths.funded_identity, "Funded identity keypair"),
         (&node.paths.unfunded_identity, "Unfunded identity keypair"),
-        (&node.paths.vote_keypair, "Vote keypair"),
     ];
 
     for (path, description) in keypairs {
@@ -961,10 +960,6 @@ fn validate_node_config(
 
     if node.paths.unfunded_identity.is_empty() {
         issues.push(format!("{} unfunded identity path is empty", node_name));
-    }
-
-    if node.paths.vote_keypair.is_empty() {
-        issues.push(format!("{} vote keypair path is empty", node_name));
     }
 
     if node.paths.solana_cli.is_empty() {
@@ -1717,15 +1712,11 @@ async fn detect_node_status_and_executable(
                         let version_num = parts[1];
                         if line.contains("client:Firedancer") {
                             version = Some(format!("Firedancer {}", version_num));
-                        } else if line.contains("client:Agave")
-                            || line.contains("client:Bam")
-                        {
+                        } else if line.contains("client:Agave") || line.contains("client:Bam") {
                             version = Some(format!("Agave {}", version_num));
                         } else if version_num.starts_with("0.") {
                             version = Some(format!("Firedancer {}", version_num));
-                        } else if version_num.starts_with("2.")
-                            || version_num.starts_with("3.")
-                        {
+                        } else if version_num.starts_with("2.") || version_num.starts_with("3.") {
                             version = Some(format!("Agave {}", version_num));
                         } else if line.starts_with("agave-validator ") {
                             // agave-validator binary is a strong signal for Agave
@@ -1960,7 +1951,6 @@ async fn detect_node_status_and_executable(
 /// This function checks:
 /// - Funded identity keypair (readable)
 /// - Unfunded identity keypair (readable)
-/// - Vote keypair (readable)
 /// - Ledger directory (exists and writable)
 /// - Tower file (only for active nodes when is_standby = Some(false))
 ///
@@ -1988,27 +1978,16 @@ pub async fn check_node_swap_readiness(
         format!(
             "test -r {} && echo 'funded_ok' || echo 'funded_fail'; \
              test -r {} && echo 'unfunded_ok' || echo 'unfunded_fail'; \
-             test -r {} && echo 'vote_ok' || echo 'vote_fail'; \
              test -d {} && test -w {} && echo 'ledger_ok' || echo 'ledger_fail'",
-            node.paths.funded_identity,
-            node.paths.unfunded_identity,
-            node.paths.vote_keypair,
-            ledger,
-            ledger
+            node.paths.funded_identity, node.paths.unfunded_identity, ledger, ledger
         )
     } else {
         format!(
             "test -r {} && echo 'funded_ok' || echo 'funded_fail'; \
              test -r {} && echo 'unfunded_ok' || echo 'unfunded_fail'; \
-             test -r {} && echo 'vote_ok' || echo 'vote_fail'; \
              ls {}/tower-1_9-*.bin >/dev/null 2>&1 && echo 'tower_ok' || echo 'tower_fail'; \
              test -d {} && test -w {} && echo 'ledger_ok' || echo 'ledger_fail'",
-            node.paths.funded_identity,
-            node.paths.unfunded_identity,
-            node.paths.vote_keypair,
-            ledger,
-            ledger,
-            ledger
+            node.paths.funded_identity, node.paths.unfunded_identity, ledger, ledger, ledger
         )
     };
 
@@ -2026,10 +2005,6 @@ pub async fn check_node_swap_readiness(
                     "unfunded_fail" => {
                         issues
                             .push("Unfunded identity keypair missing or not readable".to_string());
-                        all_ready = false;
-                    }
-                    "vote_fail" => {
-                        issues.push("Vote keypair missing or not readable".to_string());
                         all_ready = false;
                     }
                     "tower_fail" => {
@@ -2164,10 +2139,16 @@ async fn detect_node_status_and_executable_with_progress(
                     break;
                 }
                 // For Firedancer, also capture the config path
-                if validator_type == crate::types::ValidatorType::Firedancer && part == &"--config" && i + 1 < parts.len() {
+                if validator_type == crate::types::ValidatorType::Firedancer
+                    && part == &"--config"
+                    && i + 1 < parts.len()
+                {
                     firedancer_config_path = Some(parts[i + 1].to_string());
                     logger
-                        .log(&format!("Extracted Firedancer config path: {}", parts[i + 1]))
+                        .log(&format!(
+                            "Extracted Firedancer config path: {}",
+                            parts[i + 1]
+                        ))
                         .ok();
                 }
             }
@@ -2292,15 +2273,11 @@ async fn detect_node_status_and_executable_with_progress(
                         let version_num = parts[1];
                         if line.contains("client:Firedancer") {
                             version = Some(format!("Firedancer {}", version_num));
-                        } else if line.contains("client:Agave")
-                            || line.contains("client:Bam")
-                        {
+                        } else if line.contains("client:Agave") || line.contains("client:Bam") {
                             version = Some(format!("Agave {}", version_num));
                         } else if version_num.starts_with("0.") {
                             version = Some(format!("Firedancer {}", version_num));
-                        } else if version_num.starts_with("2.")
-                            || version_num.starts_with("3.")
-                        {
+                        } else if version_num.starts_with("2.") || version_num.starts_with("3.") {
                             version = Some(format!("Agave {}", version_num));
                         } else if line.starts_with("agave-validator ") {
                             // agave-validator binary is a strong signal for Agave

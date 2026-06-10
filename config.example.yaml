@@ -15,6 +15,8 @@ verbose_logging: false
 validators:
   # You can define multiple validator pairs if you manage multiple validators
   # Each validator pair shares the same vote account and identity
+  # Only the vote account PUBLIC key is needed - the vote keypair
+  # never has to be present on the validator nodes.
   - votePubkey: YOUR_VOTE_ACCOUNT_PUBKEY_HERE
     identityPubkey: YOUR_VALIDATOR_IDENTITY_PUBKEY_HERE
 
@@ -44,9 +46,6 @@ validators:
           # Path to unfunded validator identity keypair
           unfundedIdentity: /home/solana/keypairs/unfunded-validator-keypair.json
 
-          # Path to vote account keypair
-          voteKeypair: /home/solana/keypairs/vote-account-keypair.json
-
           # REQUIRED: Path to Solana CLI executable
           solanaCliPath: /home/solana/solana/bin/solana
 
@@ -69,7 +68,6 @@ validators:
         paths:
           fundedIdentity: /home/solana/keypairs/funded-validator-keypair.json
           unfundedIdentity: /home/solana/keypairs/unfunded-validator-keypair.json
-          voteKeypair: /home/solana/keypairs/vote-account-keypair.json
           solanaCliPath: /home/solana/solana/bin/solana
           # agaveValidatorPath: /home/solana/solana/bin/agave-validator
           # fdctlPath: /home/solana/firedancer/bin/fdctl
@@ -139,7 +137,6 @@ alert_config:
 #       paths:
 #         fundedIdentity: /home/solana/.secrets/funded-validator-keypair.json
 #         unfundedIdentity: /home/solana/.secrets/unfunded-validator-keypair.json
-#         voteKeypair: /home/solana/.secrets/vote-account-keypair.json
 #     - label: second-validator-node-2
 #       host: 10.0.1.2
 #       port: 22
@@ -147,7 +144,6 @@ alert_config:
 #       paths:
 #         fundedIdentity: /home/solana/.secrets/funded-validator-keypair.json
 #         unfundedIdentity: /home/solana/.secrets/unfunded-validator-keypair.json
-#         voteKeypair: /home/solana/.secrets/vote-account-keypair.json
 
 # SSH key authentication notes:
 # - The tool will automatically detect your SSH keys

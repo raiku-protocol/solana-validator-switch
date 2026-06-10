@@ -881,7 +881,7 @@ impl SwitchManager {
                     format!("{} exit && solana-validator --identity {} --vote-account {} --ledger {} --limit-ledger-size 100000000 --log - &",
                         "solana-validator",
                         self.active_node_with_status.node.paths.unfunded_identity,
-                        self.active_node_with_status.node.paths.vote_keypair,
+                        self.validator_pair.vote_pubkey,
                         ledger_path)
                 )
             }
@@ -934,7 +934,8 @@ impl SwitchManager {
                             .agave_validator_executable
                             .as_ref()
                             .unwrap();
-                        let ledger_path = self.active_node_with_status.ledger_path.as_ref().unwrap();
+                        let ledger_path =
+                            self.active_node_with_status.ledger_path.as_ref().unwrap();
 
                         let args = vec![
                             "-l",
@@ -966,9 +967,7 @@ impl SwitchManager {
     /// Rollback method: Switch the active node back to funded identity
     /// Called when Step 2 or Step 3 fails to restore the original state
     async fn rollback_primary_to_funded(&mut self) -> Result<()> {
-        println_if_not_silent!(
-            "  ⚠️  Attempting rollback with fresh SSH connection..."
-        );
+        println_if_not_silent!("  ⚠️  Attempting rollback with fresh SSH connection...");
 
         // Get fresh SSH connection for rollback (don't reuse potentially failed connection)
         let ssh_key = self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
@@ -1062,13 +1061,11 @@ impl SwitchManager {
     }
 
     async fn warmup_backup_connection(&self, purpose: &str) -> Result<()> {
-        let standby_ssh_key = self.get_ssh_key_for_node(&self.standby_node_with_status.node.host)?;
+        let standby_ssh_key =
+            self.get_ssh_key_for_node(&self.standby_node_with_status.node.host)?;
         let pool = self.ssh_pool.clone();
 
-        println_if_not_silent!(
-            "  🔥 Pre-warming backup SSH connection for {}...",
-            purpose
-        );
+        println_if_not_silent!("  🔥 Pre-warming backup SSH connection for {}...", purpose);
 
         let _ = pool
             .get_session(&self.standby_node_with_status.node, &standby_ssh_key)
@@ -1128,56 +1125,61 @@ impl SwitchManager {
         let start_time = Instant::now();
 
         // Execute the streaming transfer using base64 encoding
-            // Read base64 from source and transfer separately, measuring each phase
-            let (encoded_data, read_ms, transfer_ms, decoded_bytes) = if !dry_run {
-                // Read base64 from active
-                let read_start = Instant::now();
-                let ssh_key_active =
-                    self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
-                let data = {
-                    let pool = self.ssh_pool.clone();
-                    let base64_args = vec![tower_path.as_str()];
-                    match pool
-                        .execute_command_with_args(
-                            &self.active_node_with_status.node,
-                            &ssh_key_active,
-                            "base64",
-                            &base64_args,
-                        )
-                        .await
-                    {
-                        Ok(data) => data,
-                        Err(e) => {
-                            return Err(anyhow!("Failed to read tower file: {}", e));
-                        }
-                    }
-                };
-                let read_duration = read_start.elapsed();
-
-                // Transfer to standby and measure
-                let transfer_start = Instant::now();
-                let ssh_key_standby =
-                    self.get_ssh_key_for_node(&self.standby_node_with_status.node.host)?;
-                {
-                    let pool = self.ssh_pool.clone();
-                    pool.transfer_base64_to_file(
-                        &self.standby_node_with_status.node,
-                        &ssh_key_standby,
-                        &dest_path,
-                        &data,
+        // Read base64 from source and transfer separately, measuring each phase
+        let (encoded_data, read_ms, transfer_ms, decoded_bytes) = if !dry_run {
+            // Read base64 from active
+            let read_start = Instant::now();
+            let ssh_key_active =
+                self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
+            let data = {
+                let pool = self.ssh_pool.clone();
+                let base64_args = vec![tower_path.as_str()];
+                match pool
+                    .execute_command_with_args(
+                        &self.active_node_with_status.node,
+                        &ssh_key_active,
+                        "base64",
+                        &base64_args,
                     )
                     .await
-                    .map_err(|e| anyhow!("Failed to write tower file: {}", e))?;
+                {
+                    Ok(data) => data,
+                    Err(e) => {
+                        return Err(anyhow!("Failed to read tower file: {}", e));
+                    }
                 }
-                let transfer_duration = transfer_start.elapsed();
-
-                // Estimation of decoded bytes (base64 -> bytes)
-                let decoded_bytes = data.len() as u64 * 3 / 4;
-
-                (data, read_duration.as_secs_f64() * 1000.0, transfer_duration.as_secs_f64() * 1000.0, decoded_bytes)
-            } else {
-                (String::from("dummy"), 0.0, 0.0, 0)
             };
+            let read_duration = read_start.elapsed();
+
+            // Transfer to standby and measure
+            let transfer_start = Instant::now();
+            let ssh_key_standby =
+                self.get_ssh_key_for_node(&self.standby_node_with_status.node.host)?;
+            {
+                let pool = self.ssh_pool.clone();
+                pool.transfer_base64_to_file(
+                    &self.standby_node_with_status.node,
+                    &ssh_key_standby,
+                    &dest_path,
+                    &data,
+                )
+                .await
+                .map_err(|e| anyhow!("Failed to write tower file: {}", e))?;
+            }
+            let transfer_duration = transfer_start.elapsed();
+
+            // Estimation of decoded bytes (base64 -> bytes)
+            let decoded_bytes = data.len() as u64 * 3 / 4;
+
+            (
+                data,
+                read_duration.as_secs_f64() * 1000.0,
+                transfer_duration.as_secs_f64() * 1000.0,
+                decoded_bytes,
+            )
+        } else {
+            (String::from("dummy"), 0.0, 0.0, 0)
+        };
 
         let transfer_duration = start_time.elapsed();
         self.tower_transfer_time = Some(transfer_duration);
@@ -1306,7 +1308,7 @@ impl SwitchManager {
                     format!("{} exit && solana-validator --identity {} --vote-account {} --ledger {} --limit-ledger-size 100000000 --log - &",
                         "solana-validator",
                         self.standby_node_with_status.node.paths.funded_identity,
-                        self.standby_node_with_status.node.paths.vote_keypair,
+                        self.validator_pair.vote_pubkey,
                         ledger_path)
                 )
             }
@@ -1332,8 +1334,9 @@ impl SwitchManager {
                 match self.standby_node_with_status.validator_type {
                     crate::types::ValidatorType::Firedancer => {
                         // Firedancer: fdctl set-identity --config <config> <identity>
-                        let fdctl_path =
-                            crate::executable_utils::get_fdctl_path(&self.standby_node_with_status)?;
+                        let fdctl_path = crate::executable_utils::get_fdctl_path(
+                            &self.standby_node_with_status,
+                        )?;
                         let config_path = self
                             .get_firedancer_config_path(&self.standby_node_with_status)
                             .await?;
@@ -1366,7 +1369,8 @@ impl SwitchManager {
                             .agave_validator_executable
                             .as_ref()
                             .unwrap();
-                        let ledger_path = self.standby_node_with_status.ledger_path.as_ref().unwrap();
+                        let ledger_path =
+                            self.standby_node_with_status.ledger_path.as_ref().unwrap();
 
                         let args = vec![
                             "-l",

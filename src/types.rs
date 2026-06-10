@@ -95,8 +95,6 @@ pub struct NodePaths {
     pub funded_identity: String,
     #[serde(rename = "unfundedIdentity")]
     pub unfunded_identity: String,
-    #[serde(rename = "voteKeypair")]
-    pub vote_keypair: String,
     #[serde(rename = "solanaCliPath")]
     pub solana_cli: String,
     #[serde(rename = "agaveValidatorPath", skip_serializing_if = "Option::is_none")]
@@ -135,15 +133,15 @@ pub struct NodeWithStatus {
     pub agave_validator_executable: Option<String>, // Path to agave-validator executable (for catchup check)
     pub fdctl_executable: Option<String>, // Path to fdctl executable (for firedancer identity set)
     pub firedancer_config_path: Option<String>, // Cached Firedancer config path from startup detection
-    pub solana_cli_executable: Option<String>, // Path to solana CLI executable
-    pub version: Option<String>,          // Version information (e.g., "Firedancer 0.505.20216")
-    pub sync_status: Option<String>,      // Sync status (e.g., "Caught up (slot: 344297365)")
+    pub solana_cli_executable: Option<String>,  // Path to solana CLI executable
+    pub version: Option<String>, // Version information (e.g., "Firedancer 0.505.20216")
+    pub sync_status: Option<String>, // Sync status (e.g., "Caught up (slot: 344297365)")
     pub current_identity: Option<String>, // Current validator identity (from catchup command)
-    pub ledger_path: Option<String>,      // Ledger path extracted from running process or config
-    pub tower_path: Option<String>,       // Tower file path derived from ledger path and identity
-    pub swap_ready: Option<bool>,         // Whether the node is ready for validator switching
-    pub swap_issues: Vec<String>,         // Issues preventing swap readiness
-    pub ssh_key_path: Option<String>,     // Detected SSH key path for this node
+    pub ledger_path: Option<String>, // Ledger path extracted from running process or config
+    pub tower_path: Option<String>, // Tower file path derived from ledger path and identity
+    pub swap_ready: Option<bool>, // Whether the node is ready for validator switching
+    pub swap_issues: Vec<String>, // Issues preventing swap readiness
+    pub ssh_key_path: Option<String>, // Detected SSH key path for this node
 }
 
 #[derive(Debug)]

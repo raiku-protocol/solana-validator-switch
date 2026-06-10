@@ -81,7 +81,6 @@ mod tests {
             paths: NodePaths {
                 funded_identity: funded.to_string(),
                 unfunded_identity: unfunded.to_string(),
-                vote_keypair: "/home/solana/vote.json".to_string(),
             },
             ssh_key_path: None,
         }

@@ -12,7 +12,6 @@ validators:
         paths:
           fundedIdentity: "/tmp/test/funded-validator-keypair.json"
           unfundedIdentity: "/tmp/test/unfunded-validator-keypair.json"
-          voteKeypair: "/tmp/test/vote-account-keypair.json"
       # Test Firedancer validator
       - label: "Test-Firedancer-Node"
         host: "127.0.0.1"
@@ -21,4 +20,3 @@ validators:
         paths:
           fundedIdentity: "/tmp/test/funded-validator-keypair.json"
           unfundedIdentity: "/tmp/test/unfunded-validator-keypair.json"
-          voteKeypair: "/tmp/test/vote-account-keypair.json"

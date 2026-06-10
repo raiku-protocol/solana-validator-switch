@@ -69,7 +69,6 @@ validators:
         paths:
           fundedIdentity: /home/solana/funded-validator-keypair.json
           unfundedIdentity: /home/solana/unfunded-validator-keypair.json
-          voteKeypair: /home/solana/vote-account-keypair.json
       
       - label: validator-2
         host: 10.0.0.2
@@ -77,7 +76,6 @@ validators:
         paths:
           fundedIdentity: /home/solana/funded-validator-keypair.json
           unfundedIdentity: /home/solana/unfunded-validator-keypair.json
-          voteKeypair: /home/solana/vote-account-keypair.json
 ```
 
 ### Telegram Alerts (Optional)

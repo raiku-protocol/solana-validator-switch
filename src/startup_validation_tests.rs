@@ -15,7 +15,6 @@ mod startup_validation_tests {
                 paths: NodePaths {
                     funded_identity: "/home/solana/funded.json".to_string(),
                     unfunded_identity: "/home/solana/unfunded.json".to_string(),
-                    vote_keypair: "/home/solana/vote.json".to_string(),
                     solana_cli: "/home/solana/bin/solana".to_string(),
                     agave_validator: Some("/home/solana/bin/agave-validator".to_string()),
                     fdctl: None,
@@ -62,7 +61,6 @@ mod startup_validation_tests {
                     paths: NodePaths {
                         funded_identity: "/home/solana/funded.json".to_string(),
                         unfunded_identity: "/home/solana/unfunded.json".to_string(),
-                        vote_keypair: "/home/solana/vote.json".to_string(),
                         solana_cli: "/home/solana/bin/solana".to_string(),
                         agave_validator: Some("/home/solana/bin/agave-validator".to_string()),
                         fdctl: None,
@@ -77,7 +75,6 @@ mod startup_validation_tests {
                     paths: NodePaths {
                         funded_identity: "/home/solana/funded.json".to_string(),
                         unfunded_identity: "/home/solana/unfunded.json".to_string(),
-                        vote_keypair: "/home/solana/vote.json".to_string(),
                         solana_cli: "/home/solana/bin/solana".to_string(),
                         agave_validator: Some("/home/solana/bin/agave-validator".to_string()),
                         fdctl: None,

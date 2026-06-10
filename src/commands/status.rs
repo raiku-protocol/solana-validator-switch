@@ -688,8 +688,7 @@ fn parse_batch_output(output: &str, status: &mut ComprehensiveStatus) {
                             // Fallback based on version number pattern
                             if version_num.starts_with("0.") {
                                 status.version = Some(format!("Firedancer {}", version_num));
-                            } else if version_num.starts_with("2.")
-                                || version_num.starts_with("3.")
+                            } else if version_num.starts_with("2.") || version_num.starts_with("3.")
                             {
                                 status.version = Some(format!("Agave {}", version_num));
                             } else {
@@ -726,7 +725,6 @@ async fn check_swap_readiness(
         "echo '=== FILES ===' && \
          test -r {} && echo 'funded_ok' || echo 'funded_fail'; \
          test -r {} && echo 'unfunded_ok' || echo 'unfunded_fail'; \
-         test -r {} && echo 'vote_ok' || echo 'vote_fail'; \
          ls {} >/dev/null 2>&1 && echo 'tower_ok' || echo 'tower_fail'; \
          echo '=== DIRS ===' && \
          test -d {} && test -w {} && echo 'ledger_ok' || echo 'ledger_fail'; \
@@ -734,7 +732,6 @@ async fn check_swap_readiness(
          df {} | tail -1 | awk '{{print $4}}' | head -1",
         node.paths.funded_identity,
         node.paths.unfunded_identity,
-        node.paths.vote_keypair,
         tower_pattern,
         ledger,
         ledger,
@@ -778,12 +775,6 @@ fn parse_swap_readiness_output(
             "unfunded_fail" => {
                 checklist.push(("Unfunded Identity".to_string(), false));
                 issues.push("Unfunded identity keypair missing or not readable".to_string());
-                *all_ready = false;
-            }
-            "vote_ok" => checklist.push(("Vote Keypair".to_string(), true)),
-            "vote_fail" => {
-                checklist.push(("Vote Keypair".to_string(), false));
-                issues.push("Vote keypair missing or not readable".to_string());
                 *all_ready = false;
             }
             "tower_ok" => checklist.push(("Tower File".to_string(), true)),
@@ -2071,31 +2062,9 @@ async fn verify_public_keys(
             .push("Could not verify Identity Pubkey - failed to read funded keypair".to_string());
     }
 
-    // Verify Vote Pubkey
-    if let Ok(output) = pool
-        .execute_command(
-            node,
-            ssh_key_path,
-            &format!("{} address -k {}", "solana", node.paths.vote_keypair),
-        )
-        .await
-    {
-        let actual_vote_account = output.trim();
-        if actual_vote_account == validator_pair.vote_pubkey {
-            status.vote_account_verified = Some(true);
-        } else {
-            status.vote_account_verified = Some(false);
-            status.verification_issues.push(format!(
-                "Vote Pubkey mismatch: expected {}, found {}",
-                validator_pair.vote_pubkey, actual_vote_account
-            ));
-        }
-    } else {
-        status.vote_account_verified = Some(false);
-        status
-            .verification_issues
-            .push("Could not verify Vote Pubkey - failed to read vote keypair".to_string());
-    }
+    // Vote account is configured as a public key only; no vote keypair is kept
+    // on the nodes, so there is nothing to verify against on the box.
+    status.vote_account_verified = None;
 }
 
 fn truncate_path(path: &str, max_length: usize) -> String {
