@@ -30,9 +30,7 @@ Professional-grade CLI tool for ultra-fast Solana validator switching with runti
   - `alert.rs` - Telegram alert functionality
   - `config.rs` - Configuration management
   - `solana_rpc.rs` - Solana RPC interactions
-- `docs/` - Technical documentation
 - `tests/` - Integration and unit tests
-- `wiki/` - GitHub wiki pages
 
 ## Development Workflow
 
@@ -41,14 +39,6 @@ Professional-grade CLI tool for ultra-fast Solana validator switching with runti
 3. **Formatting**: Run `cargo fmt`
 4. **Building**: Run `cargo build --release`
 5. **Pre-commit hooks**: Set up with `./setup-hooks.sh`
-
-## Recent Updates (v1.2.0)
-
-- Side-by-side table layout with SSH health monitoring
-- Catchup failure alerts for standby nodes
-- Enhanced test alerts showing all alert types
-- Improved status UI with countdown timers
-- Better error handling and recovery strategies
 
 ## Key Commands
 
@@ -82,6 +72,5 @@ Professional-grade CLI tool for ultra-fast Solana validator switching with runti
 
 - This is a defensive security tool for validator operators
 - Helps maintain validator uptime and prevent slashing
-- Used in production by Huisky Labs validators
-- Open source project with active development
+- Internal Raiku fork of huiskylabs/solana-validator-switch, not published
 - Never include CLAUDE inside commit message
