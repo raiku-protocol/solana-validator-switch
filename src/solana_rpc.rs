@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use std::str::FromStr;
 
 /// Nominal slot duration used to convert between slots and wall-clock time.
@@ -120,6 +120,9 @@ pub struct VoteAccountInfo {
 pub struct RecentVote {
     pub slot: u64,
     pub confirmation_count: u32,
+    /// Slots between the voted-on slot and the slot the vote landed in, as
+    /// recorded on-chain — the number TVC credits are paid on. 0 = unknown
+    /// (vote predates latency recording, or degraded fallback path).
     pub latency: u64,
 }
 
@@ -166,20 +169,21 @@ fn compute_tvc_rank(
 }
 
 fn compute_avg_vote_latency(recent_votes: &[RecentVote]) -> Option<f64> {
-    if recent_votes.len() <= 1 {
+    // Latency 0 means the vote predates on-chain latency recording (or comes
+    // from the degraded fallback path) — exclude those from the average.
+    let latencies: Vec<u64> = recent_votes
+        .iter()
+        .map(|v| v.latency)
+        .filter(|&l| l > 0)
+        .collect();
+    if latencies.is_empty() {
         return None;
     }
-    // Exclude the last element (oldest vote, which defaults to 1)
-    let votes_to_avg = &recent_votes[..recent_votes.len() - 1];
-    if votes_to_avg.is_empty() {
-        return None;
-    }
-    let sum: u64 = votes_to_avg.iter().map(|v| v.latency).sum();
-    Some(sum as f64 / votes_to_avg.len() as f64)
+    Some(latencies.iter().sum::<u64>() as f64 / latencies.len() as f64)
 }
 
 fn compute_missed_votes(
-    votes: &std::collections::VecDeque<solana_sdk::vote::state::LandedVote>,
+    votes: &std::collections::VecDeque<solana_vote_interface::state::LandedVote>,
     current_slot: u64,
     max_window: u64,
 ) -> (u64, u64) {
@@ -239,18 +243,20 @@ pub async fn fetch_vote_account_data(
         })?;
 
     // Get detailed vote account data. We still ask for this because the
-    // deserialized VoteState gives us a richer view (recent votes list with
-    // per-vote latency, credits, last_timestamp) — but newer on-chain vote
-    // state formats (e.g. VoteStateV4 introduced with Agave 2.x / Firedancer
-    // 0.5+) are not understood by the deserializer in solana-sdk 1.18 and
-    // produce a "invalid account data for instruction" error. When that
-    // happens we fall back to the lighter view derivable from `vote_info`,
-    // which is enough to keep delinquency detection working.
+    // deserialized vote state gives us a richer view (recent votes list with
+    // per-vote latency, credits, last_timestamp). VoteStateV4::deserialize
+    // understands every on-chain format (V1_14_11, V3, V4) and converts it to
+    // V4, so this covers Agave 2.x+ / Firedancer 0.5+ accounts too. Should a
+    // future format appear that it can't decode, we fall back to the lighter
+    // view derivable from `vote_info`, which is enough to keep delinquency
+    // detection working.
     let account_data = rpc_client
         .get_account(&vote_pubkey)
         .map_err(|e| anyhow!("Failed to get vote account data: {}", e))?;
 
-    let vote_state = solana_sdk::vote::state::VoteState::deserialize(&account_data.data).ok();
+    let vote_state =
+        solana_vote_interface::state::VoteStateV4::deserialize(&account_data.data, &vote_pubkey)
+            .ok();
 
     let current_slot = rpc_client
         .get_slot()
@@ -263,33 +269,21 @@ pub async fn fetch_vote_account_data(
     if let Some(ref vs) = vote_state {
         // Get the most recent votes (up to 31 as shown in the example).
         // The votes are stored in order, with most recent at the end.
-        let vote_count = vs.votes.len();
-        for (i, lockout) in vs.votes.iter().rev().take(31).enumerate() {
-            // Calculate latency as difference between consecutive votes.
-            // For the most recent vote, use current slot.
-            let latency = if i == 0 {
-                // Most recent vote - latency from current slot
-                current_slot.saturating_sub(lockout.slot())
-            } else if i < vote_count - 1 {
-                // Get the next more recent vote (previous in reversed iteration)
-                if let Some(next_vote) = vs.votes.get(vote_count - i) {
-                    next_vote.slot().saturating_sub(lockout.slot())
-                } else {
-                    1 // Default latency
-                }
-            } else {
-                1 // Default latency for oldest vote
-            };
-
+        //
+        // `latency` is the value recorded on-chain: the number of slots
+        // between the voted-on slot and the slot the vote transaction landed
+        // in — the same number TVC credits are paid on. Votes cast before
+        // validators recorded latencies carry 0 ("unknown").
+        for (i, landed) in vs.votes.iter().rev().take(31).enumerate() {
             recent_votes.push(RecentVote {
-                slot: lockout.slot(),
+                slot: landed.slot(),
                 confirmation_count: (i + 1) as u32,
-                latency,
+                latency: landed.latency as u64,
             });
         }
     } else {
-        // Fallback path: we couldn't decode the on-chain VoteState (likely a
-        // VoteStateV4 / newer format). vote_info.last_vote is still trustworthy
+        // Fallback path: we couldn't decode the on-chain vote state (a format
+        // newer than VoteStateV4). vote_info.last_vote is still trustworthy
         // because it comes from get_vote_accounts() and doesn't require account
         // data decoding on our side. One entry is enough to drive delinquency
         // detection in status_ui_v2; the richer UI columns (latency over the
@@ -304,7 +298,7 @@ pub async fn fetch_vote_account_data(
         recent_votes.push(RecentVote {
             slot: vote_info.last_vote,
             confirmation_count: 1,
-            latency: current_slot.saturating_sub(vote_info.last_vote),
+            latency: 0, // unknown — same convention as pre-latency-tracking votes
         });
     }
 
@@ -333,12 +327,12 @@ pub async fn fetch_vote_account_data(
         }
     };
 
-    // Determine if validator is voting (has voted recently)
-    let is_voting = if let Some(last_vote) = recent_votes.first() {
-        last_vote.latency < 150 // Consider voting if voted within last 150 slots (~1 minute)
-    } else {
-        false
-    };
+    // Determine if validator is voting: its most recent vote landed within
+    // the last 150 slots (~1 minute).
+    let is_voting = recent_votes
+        .first()
+        .map(|v| current_slot.saturating_sub(v.slot) < 150)
+        .unwrap_or(false);
 
     // Pull credits and timestamp from the rich path when we have it, otherwise
     // fall back: epoch_credits is part of vote_info and gives the cumulative
@@ -376,6 +370,52 @@ pub async fn fetch_vote_account_data(
         is_voting,
         tvc_metrics,
     })
+}
+
+#[cfg(test)]
+mod vote_latency_tests {
+    use super::*;
+
+    fn vote(slot: u64, latency: u64) -> RecentVote {
+        RecentVote {
+            slot,
+            confirmation_count: 1,
+            latency,
+        }
+    }
+
+    #[test]
+    fn test_avg_latency_uses_recorded_values() {
+        let votes = vec![vote(103, 1), vote(102, 2), vote(101, 3)];
+        assert_eq!(compute_avg_vote_latency(&votes), Some(2.0));
+    }
+
+    #[test]
+    fn test_avg_latency_ignores_unknown_zero_latency() {
+        // 0 means "recorded before latency tracking" and must not drag the
+        // average down.
+        let votes = vec![vote(103, 2), vote(102, 4), vote(101, 0)];
+        assert_eq!(compute_avg_vote_latency(&votes), Some(3.0));
+    }
+
+    #[test]
+    fn test_avg_latency_none_when_all_unknown() {
+        let votes = vec![vote(103, 0), vote(102, 0)];
+        assert_eq!(compute_avg_vote_latency(&votes), None);
+    }
+
+    #[test]
+    fn test_avg_latency_none_when_empty() {
+        assert_eq!(compute_avg_vote_latency(&[]), None);
+    }
+
+    #[test]
+    fn test_avg_latency_single_vote() {
+        // The degraded fallback path synthesizes one vote with latency 0;
+        // a single *known* latency is still a valid average.
+        assert_eq!(compute_avg_vote_latency(&[vote(103, 2)]), Some(2.0));
+        assert_eq!(compute_avg_vote_latency(&[vote(103, 0)]), None);
+    }
 }
 
 #[cfg(test)]
