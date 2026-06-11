@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod alert_logic_tests {
+mod tests {
     use crate::alert::ComprehensiveAlertTracker;
     use crate::types::{AlertConfig, FailureTracker, NodeHealthStatus, TelegramConfig};
     use std::time::{Duration, Instant};

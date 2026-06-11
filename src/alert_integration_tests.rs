@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod alert_integration_tests {
+mod tests {
     use crate::types::{AlertConfig, FailureTracker, NodeHealthStatus};
     use std::time::{Duration, Instant};
 

@@ -165,7 +165,7 @@ mod scenario_tests {
             let code = error.exit_code();
             assert!(exit_codes.insert(code), "Duplicate exit code: {}", code);
             assert!(
-                code >= 10 && code <= 20,
+                (10..=20).contains(&code),
                 "Exit code out of expected range: {}",
                 code
             );

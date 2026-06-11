@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod startup_validation_tests {
+mod tests {
     use crate::types::{
         NodeConfig, NodePaths, NodeStatus, NodeWithStatus, ValidatorPair, ValidatorType,
     };
@@ -90,7 +90,7 @@ mod startup_validation_tests {
         // Scenario 1: Validator 2 Node 2 is down, but we should still be able to start
         // and switch Validator 1 nodes
 
-        let validator_statuses = vec![
+        let validator_statuses = [
             crate::ValidatorStatus {
                 validator_pair: create_test_validator_pair(1),
                 nodes_with_status: vec![
@@ -160,7 +160,7 @@ mod startup_validation_tests {
         // Scenario 2: Validator 1 Node 1 (source) is down, but we should still be able to start
         // and potentially switch to Node 2 in emergency
 
-        let validator_statuses = vec![crate::ValidatorStatus {
+        let validator_statuses = [crate::ValidatorStatus {
             validator_pair: create_test_validator_pair(1),
             nodes_with_status: vec![
                 create_test_node("node-1-1", "validator1-1.example.com", false), // DOWN (source)
@@ -224,7 +224,7 @@ mod startup_validation_tests {
         // This test documents what the OLD behavior would have done
         // to ensure we understand the change
 
-        let validator_statuses = vec![
+        let validator_statuses = [
             crate::ValidatorStatus {
                 validator_pair: create_test_validator_pair(1),
                 nodes_with_status: vec![

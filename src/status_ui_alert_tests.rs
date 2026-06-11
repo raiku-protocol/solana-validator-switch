@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod status_ui_alert_tests {
+mod tests {
     use crate::alert::AlertTracker;
     use crate::commands::status_ui_v2::{build_verbose_log_message, LogLevel};
     use crate::commands::status_ui_v2::{

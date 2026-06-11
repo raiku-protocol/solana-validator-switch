@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod switch_validation_tests {
+mod tests {
     use crate::types::{NodeConfig, NodePaths, NodeStatus, NodeWithStatus, ValidatorType};
     use std::collections::HashMap;
 
