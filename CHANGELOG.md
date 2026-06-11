@@ -185,7 +185,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No hardcoded credentials
 - Safe tower file transfer
 
-[Unreleased]: https://github.com/huiskylabs/solana-validator-switch/compare/v1.2.0...HEAD
-[1.2.0]: https://github.com/huiskylabs/solana-validator-switch/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/huiskylabs/solana-validator-switch/compare/v1.0.0...v1.1.0
-[1.0.0]: https://github.com/huiskylabs/solana-validator-switch/releases/tag/v1.0.0
+[Unreleased]: https://github.com/raiku-protocol/solana-validator-switch/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/raiku-protocol/solana-validator-switch/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/raiku-protocol/solana-validator-switch/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/raiku-protocol/solana-validator-switch/releases/tag/v1.0.0

@@ -72,5 +72,5 @@ Professional-grade CLI tool for ultra-fast Solana validator switching with runti
 
 - This is a defensive security tool for validator operators
 - Helps maintain validator uptime and prevent slashing
-- Internal Raiku fork of huiskylabs/solana-validator-switch, not published
+- Maintained by Raiku at raiku-protocol/solana-validator-switch (originally forked from huiskylabs/solana-validator-switch)
 - Never include CLAUDE inside commit message
