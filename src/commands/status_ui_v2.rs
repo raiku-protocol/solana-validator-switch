@@ -2072,7 +2072,7 @@ fn draw_ui(f: &mut ratatui::Frame, ui_state: &UiState, app_state: &AppState) {
             Constraint::Min(0),    // Validator tables take all remaining space
             Constraint::Length(1), // Footer
         ])
-        .split(f.size());
+        .split(f.area());
 
     // Draw validator summaries
     draw_validator_summaries(f, chunks[0], ui_state, app_state);
@@ -3355,7 +3355,7 @@ fn draw_switch_ui(f: &mut ratatui::Frame, app_state: &AppState, ui_state: &UiSta
             Constraint::Min(0),    // Content
             Constraint::Length(1), // Footer
         ])
-        .split(f.size());
+        .split(f.area());
 
     // Header
     let header = Paragraph::new("🔄 SWITCH VALIDATOR")

@@ -17,34 +17,35 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
-inquire = "0.7"
+inquire = "0.9"
 comfy-table = "7.1"
-openssh = { version = "0.10", features = ["native-mux"] }
+openssh = { version = "0.11", features = ["native-mux"] }
 openssl = { version = "0.10", features = ["vendored"] }
 openssl-sys = { version = "0.9", features = ["vendored"] }
-openssh-sftp-client = "0.14"
+openssh-sftp-client = "0.15"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
+# serde_yaml is unmaintained (RUSTSEC-2024-0320); serde_norway is the maintained drop-in fork
+serde_yaml = { package = "serde_norway", version = "0.9" }
 tokio = { version = "1.0", features = ["full", "sync"] }
 tokio-util = "0.7"
 anyhow = "1.0"
-crossterm = "0.27"
-indicatif = "0.17"
-colored = "2.0"
-dirs = "5.0"
-figlet-rs = "0.1.5"
+crossterm = "0.29"
+indicatif = "0.18"
+colored = "3.0"
+dirs = "6.0"
+figlet-rs = "1.0"
 url = "2.5.4"
-reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
-base64 = "0.21"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+base64 = "0.22"
 bs58 = "0.5"
-sha2 = "0.10"
-socket2 = "0.5"
+sha2 = "0.11"
+socket2 = "0.6"
 solana-client = "4.0"
-solana-pubkey = "3.0"
+solana-pubkey = "4.0"
 solana-vote-interface = { version = "5.1", features = ["bincode"] }
 chrono = "0.4"
 ctrlc = "3.4"
-ratatui = "0.26"
+ratatui = "0.30"
 futures = "0.3"
 arc-swap = "1.7"

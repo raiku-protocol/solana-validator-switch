@@ -78,7 +78,10 @@ impl Default for LeaderCheckSettings {
 }
 
 fn sha256_hex(data: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(data))
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn decode_base64_payload(payload: &str) -> Result<Vec<u8>> {
