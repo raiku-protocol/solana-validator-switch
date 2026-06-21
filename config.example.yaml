@@ -22,9 +22,14 @@ validators:
 
     # RPC endpoint for monitoring validator status
     # Options:
-    #   - https://api.mainnet-beta.solana.com (public)
+    #   - https://api.mainnet-beta.solana.com (public; note: getProgramAccounts is
+    #     disabled here, so validator metadata won't resolve)
     #   - https://api.testnet.solana.com (testnet)
     #   - Your private RPC endpoint
+    #
+    # ${VAR} and ${VAR:default} are expanded from the environment at load time,
+    # so a secret RPC URL (e.g. a Helius key) can stay out of version control:
+    #   rpc: ${SVS_RPC_URL:https://api.mainnet-beta.solana.com}
     rpc: https://api.mainnet-beta.solana.com
 
     # Define exactly 2 nodes for active/standby switching

@@ -45,6 +45,7 @@ impl ConfigManager {
         }
 
         let content = fs::read_to_string(&self.config_path)?;
+        let content = expand_env_vars(&content)?;
         let config: Config = serde_yaml::from_str(&content)?;
         Ok(config)
     }
@@ -70,5 +71,49 @@ impl ConfigManager {
             verbose_logging: false,
             alert_config: None,
         }
+    }
+}
+
+/// Expand `${VAR}` and `${VAR:default}` references in the raw config text from
+/// the process environment. This lets the committed config carry placeholders
+/// (e.g. an RPC URL with a Helius API key) so secrets stay out of the repo.
+///
+/// A bare `${VAR}` with no value set and no default is an error, so a missing
+/// secret fails loudly at load time instead of silently producing an empty URL.
+/// A literal `$` can be escaped as `$$`.
+fn expand_env_vars(content: &str) -> Result<String> {
+    subst::substitute(content, &subst::Env)
+        .map_err(|e| anyhow!("Failed to expand environment variables in config: {}", e))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_env_vars;
+
+    #[test]
+    fn expands_var_with_default_when_unset() {
+        std::env::remove_var("SVS_TEST_UNSET");
+        let out = expand_env_vars("rpc: ${SVS_TEST_UNSET:https://public.example}").unwrap();
+        assert_eq!(out, "rpc: https://public.example");
+    }
+
+    #[test]
+    fn env_value_overrides_default() {
+        std::env::set_var("SVS_TEST_SET", "https://helius.example/?api-key=secret");
+        let out = expand_env_vars("rpc: ${SVS_TEST_SET:https://public.example}").unwrap();
+        assert_eq!(out, "rpc: https://helius.example/?api-key=secret");
+        std::env::remove_var("SVS_TEST_SET");
+    }
+
+    #[test]
+    fn missing_var_without_default_errors() {
+        std::env::remove_var("SVS_TEST_REQUIRED");
+        assert!(expand_env_vars("rpc: ${SVS_TEST_REQUIRED}").is_err());
+    }
+
+    #[test]
+    fn leaves_plain_text_untouched() {
+        let input = "rpc: https://api.mainnet-beta.solana.com\nname: foo";
+        assert_eq!(expand_env_vars(input).unwrap(), input);
     }
 }
