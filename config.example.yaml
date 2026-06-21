@@ -27,9 +27,9 @@ validators:
     #   - https://api.testnet.solana.com (testnet)
     #   - Your private RPC endpoint
     #
-    # ${VAR} and ${VAR:-default} are expanded from the environment at load time,
+    # ${VAR} and ${VAR:default} are expanded from the environment at load time,
     # so a secret RPC URL (e.g. a Helius key) can stay out of version control:
-    #   rpc: ${SVS_RPC_URL:-https://api.mainnet-beta.solana.com}
+    #   rpc: ${SVS_RPC_URL:https://api.mainnet-beta.solana.com}
     rpc: https://api.mainnet-beta.solana.com
 
     # Define exactly 2 nodes for active/standby switching
