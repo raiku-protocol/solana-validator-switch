@@ -51,7 +51,9 @@ pub async fn fetch_validator_metadata(
     rpc_url: &str,
     validator_identity: &str,
 ) -> Result<Option<ValidatorMetadata>> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
 
     // Prepare the RPC request
     let payload = RpcRequest {
