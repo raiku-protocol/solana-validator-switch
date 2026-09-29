@@ -91,6 +91,11 @@ fn decode_base64_payload(payload: &str) -> Result<Vec<u8>> {
         .map_err(|e| anyhow!("Failed to decode transferred tower data: {}", e))
 }
 
+/// Alpenglow vote history file name, as written by Agave's votor into the ledger dir.
+fn vote_history_file_name(identity_pubkey: &str) -> String {
+    format!("vote_history-{identity_pubkey}.bin")
+}
+
 pub async fn switch_command(dry_run: bool, app_state: &mut crate::AppState) -> Result<bool> {
     // Clear screen and ensure clean output after menu selection
     print!("\x1B[2J\x1B[1;1H");
@@ -1250,36 +1255,70 @@ impl SwitchManager {
         Ok(())
     }
 
+    /// Copies the vote state the standby needs to take over the funded identity:
+    /// the tower, plus the vote history on Alpenglow clusters. Once the vote
+    /// account has Alpenglow votes, Agave refuses `set-identity` without the
+    /// vote history, so promotion would fail and the switch would roll back.
     pub(crate) async fn transfer_tower_file(&mut self, dry_run: bool) -> Result<()> {
+        let start_time = Instant::now();
+
         // Use the derived tower path from active node
         let tower_path = self
             .active_node_with_status
             .tower_path
-            .as_ref()
+            .clone()
             .ok_or_else(|| anyhow!("Tower path not available for active node"))?;
 
-        // Verify the tower file exists
-        let check_tower_cmd = format!("test -f {} && echo 'exists' || echo 'missing'", tower_path);
-        let tower_exists = {
-            let ssh_key = self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
-            let pool = self.ssh_pool.clone();
-            pool.execute_command(
-                &self.active_node_with_status.node,
-                &ssh_key,
-                &check_tower_cmd,
-            )
-            .await?
-        };
-
-        if tower_exists.trim() != "exists" {
+        if !self.file_exists_on_active(&tower_path).await? {
             return Err(anyhow!(
                 "Tower file not found on active node: {}",
                 tower_path
             ));
         }
+        self.tower_file_name = tower_path.split('/').last().map(str::to_string);
+        self.copy_file_to_standby_ledger(&tower_path, "tower", dry_run)
+            .await?;
 
-        let tower_filename = tower_path.split('/').last().unwrap_or("tower.bin");
-        self.tower_file_name = Some(tower_filename.to_string());
+        let active_ledger_path = self
+            .active_node_with_status
+            .ledger_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("Ledger path not detected for active node"))?;
+        let vote_history_path = format!(
+            "{}/{}",
+            active_ledger_path,
+            vote_history_file_name(&self.validator_pair.identity_pubkey)
+        );
+        if self.file_exists_on_active(&vote_history_path).await? {
+            self.copy_file_to_standby_ledger(&vote_history_path, "vote history", dry_run)
+                .await?;
+        } else {
+            println_if_not_silent!("   ▸ No vote history on active node (pre-Alpenglow), skipping");
+        }
+
+        self.tower_transfer_time = Some(start_time.elapsed());
+        Ok(())
+    }
+
+    async fn file_exists_on_active(&self, path: &str) -> Result<bool> {
+        let check_cmd = format!("test -f {} && echo 'exists' || echo 'missing'", path);
+        let ssh_key = self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
+        let output = self
+            .ssh_pool
+            .execute_command(&self.active_node_with_status.node, &ssh_key, &check_cmd)
+            .await?;
+        Ok(output.trim() == "exists")
+    }
+
+    /// Streams `source_path` from the active node into the standby's ledger
+    /// directory under the same file name, then verifies it by SHA256.
+    async fn copy_file_to_standby_ledger(
+        &self,
+        source_path: &str,
+        label: &str,
+        dry_run: bool,
+    ) -> Result<()> {
+        let file_name = source_path.split('/').last().unwrap_or(source_path);
 
         // Use detected ledger path if available, otherwise error
         let standby_ledger_path = self
@@ -1288,10 +1327,11 @@ impl SwitchManager {
             .as_ref()
             .ok_or_else(|| anyhow!("Ledger path not detected for standby node"))?;
 
-        let dest_path = format!("{}/{}", standby_ledger_path, tower_filename);
+        let dest_path = format!("{}/{}", standby_ledger_path, file_name);
 
         println_if_not_silent!(
-            "  📤 {}@{} → {}@{}",
+            "  📤 {} {}@{} → {}@{}",
+            label,
             self.active_node_with_status.node.user,
             self.active_node_with_status.node.host,
             self.standby_node_with_status.node.user,
@@ -1309,7 +1349,7 @@ impl SwitchManager {
                 self.get_ssh_key_for_node(&self.active_node_with_status.node.host)?;
             let data = {
                 let pool = self.ssh_pool.clone();
-                let base64_args = vec![tower_path.as_str()];
+                let base64_args = vec![source_path];
                 match pool
                     .execute_command_with_args(
                         &self.active_node_with_status.node,
@@ -1321,7 +1361,7 @@ impl SwitchManager {
                 {
                     Ok(data) => data,
                     Err(e) => {
-                        return Err(anyhow!("Failed to read tower file: {}", e));
+                        return Err(anyhow!("Failed to read {} file: {}", label, e));
                     }
                 }
             };
@@ -1340,7 +1380,7 @@ impl SwitchManager {
                     &data,
                 )
                 .await
-                .map_err(|e| anyhow!("Failed to write tower file: {}", e))?;
+                .map_err(|e| anyhow!("Failed to write {} file: {}", label, e))?;
             }
             let transfer_duration = transfer_start.elapsed();
 
@@ -1358,14 +1398,14 @@ impl SwitchManager {
         };
 
         let transfer_duration = start_time.elapsed();
-        self.tower_transfer_time = Some(transfer_duration);
 
         // Calculate transfer speed
         let file_size = encoded_data.len() as u64 * 3 / 4; // approximate original size from base64
         let speed_mbps = (file_size as f64 / 1024.0 / 1024.0) / transfer_duration.as_secs_f64();
 
         if !dry_run {
-            let spinner = ConditionalSpinner::new("Verifying tower file integrity...");
+            let spinner =
+                ConditionalSpinner::new(&format!("Verifying {} file integrity...", label));
             // Calculate SHA256 checksum from the exact bytes that were transferred.
             let source_checksum = sha256_hex(&decode_base64_payload(&encoded_data)?);
 
@@ -1387,7 +1427,8 @@ impl SwitchManager {
             if source_hash.is_empty() || dest_hash.is_empty() {
                 spinner.stop_with_message("");
                 return Err(anyhow!(
-                    "Failed to compute tower file checksums (source: '{}', dest: '{}')",
+                    "Failed to compute {} file checksums (source: '{}', dest: '{}')",
+                    label,
                     source_hash,
                     dest_hash
                 ));
@@ -1396,7 +1437,8 @@ impl SwitchManager {
             if source_hash != dest_hash {
                 spinner.stop_with_message("");
                 return Err(anyhow!(
-                    "Tower file checksum mismatch! Source: {}..., Dest: {}... Transfer may be corrupted.",
+                    "{} file checksum mismatch! Source: {}..., Dest: {}... Transfer may be corrupted.",
+                    label,
                     &source_hash[..16],
                     &dest_hash[..16]
                 ));
@@ -1663,7 +1705,15 @@ mod helper_tests {
     //! bytes, we eliminate that race; these tests cover the helpers in
     //! isolation so regressions are caught immediately.
 
-    use super::{decode_base64_payload, sha256_hex};
+    use super::{decode_base64_payload, sha256_hex, vote_history_file_name};
+
+    #[test]
+    fn vote_history_file_name_matches_agave_votor_layout() {
+        assert_eq!(
+            vote_history_file_name("FqtP6ztBexample"),
+            "vote_history-FqtP6ztBexample.bin"
+        );
+    }
 
     #[test]
     fn sha256_hex_of_empty_input_matches_known_constant() {
