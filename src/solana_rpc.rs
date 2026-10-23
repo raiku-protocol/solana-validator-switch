@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 /// Nominal slot duration used to convert between slots and wall-clock time.
 /// Actual slot times vary slightly; callers should build their own margin in.
-pub const MS_PER_SLOT: u64 = 400;
+pub const MS_PER_SLOT: u64 = 200;
 
 /// Snapshot of where the validator identity sits in the leader schedule.
 #[derive(Debug, Clone, Copy)]
@@ -328,7 +328,7 @@ pub async fn fetch_vote_account_data(
     };
 
     // Determine if validator is voting: its most recent vote landed within
-    // the last 150 slots (~1 minute).
+    // the last 150 slots (~30s at 200ms slots).
     let is_voting = recent_votes
         .first()
         .map(|v| current_slot.saturating_sub(v.slot) < 150)
